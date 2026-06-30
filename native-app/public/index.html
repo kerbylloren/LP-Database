@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PAOFI Livelihood Project Database</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" focusable="false">
+              <path d="M24 4 42 14v14c0 9.4-7.5 14.5-18 17-10.5-2.5-18-7.6-18-17V14L24 4Z"></path>
+              <path d="M15 26c6-1.2 11.7-4.4 18-10 1.2 8.6-3.6 16.3-13.7 19.2"></path>
+            </svg>
+          </div>
+          <div>
+            <strong>PAOFI</strong>
+            <span>Livelihood Project</span>
+          </div>
+        </div>
+
+        <nav class="app-nav" aria-label="Main navigation">
+          <button type="button" data-route="menu" class="nav-item active">
+            <span class="nav-icon" data-icon="home"></span>
+            <span>Main Menu</span>
+          </button>
+          <button type="button" data-route="search" class="nav-item">
+            <span class="nav-icon" data-icon="search"></span>
+            <span>Search</span>
+          </button>
+          <button type="button" data-route="editor" class="nav-item">
+            <span class="nav-icon" data-icon="edit"></span>
+            <span>Editor</span>
+          </button>
+          <button type="button" data-route="viewer" class="nav-item">
+            <span class="nav-icon" data-icon="view"></span>
+            <span>Record Viewer</span>
+          </button>
+          <button type="button" data-route="database" class="nav-item">
+            <span class="nav-icon" data-icon="table"></span>
+            <span>Database</span>
+          </button>
+          <button type="button" data-route="bin" class="nav-item">
+            <span class="nav-icon" data-icon="bin"></span>
+            <span>Record Bin</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span id="databaseLocation">Local SQLite database</span>
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Payatas Orione Foundation Inc.</p>
+            <h1 id="pageTitle">Main Menu</h1>
+          </div>
+          <div id="topbarActions" class="topbar-actions"></div>
+        </header>
+
+        <main id="pageRoot" class="page-root"></main>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

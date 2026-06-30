@@ -1,0 +1,41 @@
+# Windows and editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Local Codex workspace metadata
+.agents/
+.codex/
+
+# Environment and credential files
+.env
+.env.*
+!.env.example
+.clasprc.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node dependencies
+node_modules/
+
+# Local database/runtime data
+native-app/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Generated desktop packages and temporary build payloads
+native-app/dist/
+
+# Spreadsheet/import scratch files and real data exports
+native-app/.spreadsheet-work/
+*.xlsx
+*.xls
+*.csv
+!*.sample.csv

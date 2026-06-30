@@ -1,0 +1,18 @@
+* text=auto
+
+*.js text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+*.cs text eol=crlf
+
+*.sqlite binary
+*.sqlite-shm binary
+*.sqlite-wal binary
+*.xlsx binary
+*.xls binary
+*.exe binary

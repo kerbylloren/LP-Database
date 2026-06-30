@@ -1,0 +1,15 @@
+{
+  "name": "lp-database-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local desktop database app for LP beneficiary records.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "import:csv": "node scripts/import-masterlist-csv.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
