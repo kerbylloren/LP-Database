@@ -430,17 +430,320 @@ function attachRecordOpenHandlers(scope = document) {
   });
 }
 
+const ANALYTICS_COLORS = ["#1f7a4f", "#2f68b1", "#b7791f", "#6752b8", "#b33a3a", "#6c746f"];
+
+function analyticsValue(record, name, fallback = "Not Specified") {
+  const text = fieldValue(name, record?.[name]);
+  if (!text || text === "-" || /^n\/?a$/i.test(text)) return fallback;
+  return text;
+}
+
+function analyticsTokens(record, name, fallback = "Not Specified") {
+  const tokens = fieldValue(name, record?.[name])
+    .split(/\r?\n|,|;/)
+    .map(item => item.trim())
+    .filter(item => item && item !== "-" && !/^n\/?a$/i.test(item));
+
+  return tokens.length ? tokens : [fallback];
+}
+
+function countBy(records, getter) {
+  const counts = new Map();
+
+  records.forEach(record => {
+    const values = getter(record);
+    const items = Array.isArray(values) ? values : [values];
+
+    items.forEach(value => {
+      const label = String(value || "").trim();
+      if (!label) return;
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+  });
+
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+}
+
+function analyticsCount(entries, label) {
+  const target = label.toLowerCase();
+  return entries.find(entry => entry.label.toLowerCase() === target)?.count || 0;
+}
+
+function analyticsPercent(count, total) {
+  return total ? Math.round((count / total) * 100) : 0;
+}
+
+function analyticsPlural(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function parseAnalyticsNumber(value) {
+  const number = Number(String(value || "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(number) ? number : null;
+}
+
+function ageGroup(age) {
+  if (age < 18) return "Under 18";
+  if (age <= 24) return "18-24";
+  if (age <= 34) return "25-34";
+  if (age <= 44) return "35-44";
+  if (age <= 54) return "45-54";
+  return "55+";
+}
+
+function parseAnalyticsDate(value) {
+  const text = String(value || "").trim();
+  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    return new Date(Number(slashMatch[3]), Number(slashMatch[2]) - 1, Number(slashMatch[1]));
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestUpdatedRecord(records) {
+  return records.reduce((latest, record) => {
+    const date = parseAnalyticsDate(record.date_updated) || parseAnalyticsDate(record.updated_at);
+    if (!date) return latest;
+    if (!latest || date > latest.date) {
+      return {
+        date,
+        label: fieldValue("date_updated", record.date_updated) || fieldValue("updated_at", record.updated_at)
+      };
+    }
+    return latest;
+  }, null);
+}
+
+function buildAnalytics(records = []) {
+  const activeRecords = records.filter(Boolean);
+  const total = activeRecords.length;
+  const ages = activeRecords
+    .map(record => parseAnalyticsNumber(record.field_c11))
+    .filter(age => age !== null && age > 0 && age < 120);
+  const latest = latestUpdatedRecord(activeRecords);
+
+  return {
+    total,
+    averageAge: ages.length ? Math.round(ages.reduce((sum, age) => sum + age, 0) / ages.length) : 0,
+    latestUpdate: latest?.label || "No updates yet",
+    statusCounts: countBy(activeRecords, record => analyticsValue(record, "status", "Active")),
+    genderCounts: countBy(activeRecords, record => analyticsValue(record, "field_h11")),
+    ageCounts: countBy(activeRecords, record => {
+      const age = parseAnalyticsNumber(record.field_c11);
+      return age !== null && age > 0 && age < 120 ? ageGroup(age) : "Not Specified";
+    }),
+    chapelCounts: countBy(activeRecords, record => analyticsValue(record, "field_c12")),
+    circumstanceCounts: countBy(activeRecords, record => analyticsValue(record, "field_c14", "None")),
+    beneficiaryCounts: countBy(activeRecords, record => analyticsValue(record, "paofi_active")),
+    programCounts: countBy(activeRecords, record => analyticsTokens(record, "field_k30", "None")),
+    livelihoodCounts: countBy(activeRecords, record => analyticsValue(record, "field_e32")),
+    businessCounts: countBy(activeRecords, record => analyticsValue(record, "with_business")),
+    existingBusinessCounts: countBy(activeRecords, record => analyticsValue(record, "field_j33", "None")),
+    durationCounts: countBy(activeRecords, record => analyticsValue(record, "business_duration")),
+    interestCounts: countBy(activeRecords, record => analyticsTokens(record, "livelihood_interest")),
+    seminarCounts: countBy(activeRecords, record => analyticsValue(record, "seminar")),
+    willingnessCounts: countBy(activeRecords, record => analyticsValue(record, "willingness")),
+    commitmentCounts: countBy(activeRecords, record => analyticsValue(record, "commit_days"))
+  };
+}
+
+function topAnalyticsEntry(entries) {
+  return entries[0] || { label: "No Data", count: 0 };
+}
+
+function renderAnalyticsKpi(label, value, caption, tone = "") {
+  return `
+    <article class="analytics-kpi ${tone}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <em>${escapeHtml(caption)}</em>
+    </article>
+  `;
+}
+
+function renderBarList(entries, total, limit = 5) {
+  const visible = entries.slice(0, limit);
+
+  if (!visible.length) {
+    return `<div class="analytics-empty">No data yet.</div>`;
+  }
+
+  return `
+    <div class="bar-list">
+      ${visible.map((entry, index) => {
+        const percent = analyticsPercent(entry.count, total);
+        const color = ANALYTICS_COLORS[index % ANALYTICS_COLORS.length];
+        return `
+          <div class="bar-row">
+            <div class="bar-row-meta">
+              <span>${escapeHtml(entry.label)}</span>
+              <strong>${entry.count} (${percent}%)</strong>
+            </div>
+            <div class="bar-track">
+              <span style="width: ${percent}%; background: ${color};"></span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderDonutChart(entries, total, limit = 5) {
+  const visible = entries.slice(0, limit);
+  let offset = 25;
+
+  const segments = visible.map((entry, index) => {
+    const percent = total ? (entry.count / total) * 100 : 0;
+    const segment = `
+      <circle
+        class="donut-segment"
+        cx="21"
+        cy="21"
+        r="15.9155"
+        stroke="${ANALYTICS_COLORS[index % ANALYTICS_COLORS.length]}"
+        stroke-dasharray="${percent} ${100 - percent}"
+        stroke-dashoffset="${offset}">
+      </circle>
+    `;
+    offset -= percent;
+    return segment;
+  }).join("");
+
+  return `
+    <div class="donut-wrap">
+      <div class="donut-frame">
+        <svg class="donut-chart" viewBox="0 0 42 42" aria-hidden="true">
+          <circle class="donut-bg" cx="21" cy="21" r="15.9155"></circle>
+          ${segments}
+        </svg>
+        <div class="donut-center">
+          <strong>${total}</strong>
+          <span>records</span>
+        </div>
+      </div>
+      <div class="chart-legend">
+        ${visible.length ? visible.map((entry, index) => `
+          <div>
+            <span class="legend-swatch" style="background: ${ANALYTICS_COLORS[index % ANALYTICS_COLORS.length]};"></span>
+            <strong>${escapeHtml(entry.label)}</strong>
+            <em>${analyticsPercent(entry.count, total)}%</em>
+          </div>
+        `).join("") : `<div class="analytics-empty">No data yet.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderAnalyticsCard(title, subtitle, body, className = "") {
+  return `
+    <article class="analytics-card ${className}">
+      <div class="analytics-card-head">
+        <h4>${escapeHtml(title)}</h4>
+        <span>${escapeHtml(subtitle)}</span>
+      </div>
+      ${body}
+    </article>
+  `;
+}
+
+function renderMenuAnalytics(analytics) {
+  const topInterest = topAnalyticsEntry(analytics.interestCounts);
+  const topChapel = topAnalyticsEntry(analytics.chapelCounts);
+  const femaleCount = analyticsCount(analytics.genderCounts, "Female");
+  const willingCount = analyticsCount(analytics.willingnessCounts, "Oo");
+
+  return `
+    <section class="analytics-summary">
+      <div class="analytics-title-row">
+        <div>
+          <span class="analytics-eyebrow">Analytics Snapshot</span>
+          <h3>Livelihood Program Overview</h3>
+        </div>
+        <button type="button" class="text-button" data-menu-route="database">View Details</button>
+      </div>
+      <div class="analytics-kpi-grid">
+        ${renderAnalyticsKpi("Average Age", analytics.averageAge ? String(analytics.averageAge) : "N/A", `${analytics.total} active records`, "green")}
+        ${renderAnalyticsKpi("Top Interest", topInterest.label, analyticsPlural(topInterest.count, "record"), "blue")}
+        ${renderAnalyticsKpi("Top Chapel", topChapel.label, analyticsPlural(topChapel.count, "record"), "amber")}
+        ${renderAnalyticsKpi("Willing to Attend", `${willingCount}`, `${analyticsPercent(willingCount, analytics.total)}% of applicants`, "violet")}
+      </div>
+      <div class="analytics-preview-grid">
+        ${renderAnalyticsCard("Gender Mix", `${femaleCount} female applicants`, renderBarList(analytics.genderCounts, analytics.total, 4))}
+        ${renderAnalyticsCard("Livelihood Interest", "Top requested activities", renderBarList(analytics.interestCounts, analytics.total, 4))}
+      </div>
+    </section>
+  `;
+}
+
+function renderDatabaseAnalytics(analytics) {
+  const topInterest = topAnalyticsEntry(analytics.interestCounts);
+  const hasBusiness = analyticsCount(analytics.businessCounts, "Mayroon");
+  const paofiBeneficiary = analyticsCount(analytics.beneficiaryCounts, "Mayroon");
+  const attendedSeminar = analyticsCount(analytics.seminarCounts, "Oo");
+  const willingCount = analyticsCount(analytics.willingnessCounts, "Oo");
+
+  return `
+    <section class="database-analytics">
+      <div class="analytics-title-row">
+        <div>
+          <span class="analytics-eyebrow">Detailed Analytics</span>
+          <h3>Database Visualization</h3>
+        </div>
+        <span class="analytics-note">Last updated: ${escapeHtml(analytics.latestUpdate)}</span>
+      </div>
+      <div class="analytics-kpi-grid detailed">
+        ${renderAnalyticsKpi("Records Analyzed", String(analytics.total), "Current active database", "green")}
+        ${renderAnalyticsKpi("Top Interest", topInterest.label, analyticsPlural(topInterest.count, "record"), "blue")}
+        ${renderAnalyticsKpi("Has Small Business", String(hasBusiness), `${analyticsPercent(hasBusiness, analytics.total)}% of applicants`, "amber")}
+        ${renderAnalyticsKpi("PAOFI Beneficiary", String(paofiBeneficiary), `${analyticsPercent(paofiBeneficiary, analytics.total)}% of households`, "violet")}
+        ${renderAnalyticsKpi("Attended Seminar", String(attendedSeminar), `${analyticsPercent(attendedSeminar, analytics.total)}% of applicants`, "red")}
+        ${renderAnalyticsKpi("Ready for Training", String(willingCount), `${analyticsPercent(willingCount, analytics.total)}% willing`, "green")}
+      </div>
+      <div class="analytics-chart-grid">
+        ${renderAnalyticsCard("Gender Distribution", "Applicant profile", renderDonutChart(analytics.genderCounts, analytics.total), "wide")}
+        ${renderAnalyticsCard("Age Groups", `Average age: ${analytics.averageAge || "N/A"}`, renderBarList(analytics.ageCounts, analytics.total, 6))}
+        ${renderAnalyticsCard("Livelihood Interest", `Top: ${topInterest.label}`, renderBarList(analytics.interestCounts, analytics.total, 6))}
+        ${renderAnalyticsCard("Chapel Distribution", "Top represented chapels", renderBarList(analytics.chapelCounts, analytics.total, 7))}
+        ${renderAnalyticsCard("PAOFI Beneficiary", "Household affiliation", renderDonutChart(analytics.beneficiaryCounts, analytics.total, 4))}
+        ${renderAnalyticsCard("Training Readiness", "Willingness and seminars", `
+          <div class="stacked-analytics">
+            <div>
+              <span>Willingness</span>
+              ${renderBarList(analytics.willingnessCounts, analytics.total, 3)}
+            </div>
+            <div>
+              <span>Seminar History</span>
+              ${renderBarList(analytics.seminarCounts, analytics.total, 3)}
+            </div>
+          </div>
+        `)}
+        ${renderAnalyticsCard("Program History", "Previous PAOFI programs", renderBarList(analytics.programCounts, analytics.total, 6))}
+        ${renderAnalyticsCard("Current Livelihood", "Existing income sources", renderBarList(analytics.livelihoodCounts, analytics.total, 6))}
+        ${renderAnalyticsCard("Business Duration", "Experience before application", renderBarList(analytics.durationCounts, analytics.total, 5))}
+        ${renderAnalyticsCard("Special Circumstance", "Declared circumstances", renderBarList(analytics.circumstanceCounts, analytics.total, 5))}
+      </div>
+    </section>
+  `;
+}
+
 async function renderMenuPage() {
   setTitle("Main Menu");
   setTopbarActions([
     { id: "menuExport", label: "Export", icon: "export", onClick: () => exportData().catch(error => showToast(error.message)) }
   ]);
 
-  const [stats, recentPayload, binPayload] = await Promise.all([
+  const [stats, recentPayload, binPayload, exportPayload] = await Promise.all([
     refreshStats(),
     api("/api/records?limit=5"),
-    api("/api/bin")
+    api("/api/bin"),
+    api("/api/export")
   ]);
+  const analytics = buildAnalytics(exportPayload.records || []);
 
   elements.pageRoot.innerHTML = `
     <section class="menu-hero">
@@ -469,6 +772,8 @@ async function renderMenuPage() {
         <strong id="nextControlNo">...</strong>
       </button>
     </section>
+
+    ${renderMenuAnalytics(analytics)}
 
     <section class="menu-grid">
       ${menuTile("search", "search", "Search Records")}
@@ -1069,7 +1374,12 @@ async function renderDatabasePage() {
     { id: "databaseExport", label: "Export", icon: "export", onClick: () => exportData().catch(error => showToast(error.message)) }
   ]);
 
+  const exportPayload = await api("/api/export");
+  const analytics = buildAnalytics(exportPayload.records || []);
+
   elements.pageRoot.innerHTML = `
+    ${renderDatabaseAnalytics(analytics)}
+
     <section class="database-page">
       <div class="table-toolbar">
         <div class="search-band compact">
