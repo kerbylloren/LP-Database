@@ -26,7 +26,7 @@ npm run package:installer
 The output is:
 
 ```text
-dist-electron\PAOFI-LP-Database-Setup-0.1.0-x64.exe
+dist-electron\PAOFI-LP-Database-Setup-0.1.1-x64.exe
 ```
 
 Portable build:
@@ -38,7 +38,7 @@ npm run package:standalone
 The output is:
 
 ```text
-dist-electron\PAOFI-LP-Database-Standalone-0.1.0-x64.exe
+dist-electron\PAOFI-LP-Database-Standalone-0.1.1-x64.exe
 ```
 
 Or run:
