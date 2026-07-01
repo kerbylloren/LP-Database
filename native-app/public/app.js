@@ -85,6 +85,48 @@ const DATABASE_TABLE_FIELDS = [
   "commit_days"
 ];
 
+const MONITORING_PROJECT_OPTIONS = [
+  "Dishwashing Liquid Production",
+  "Rag Making",
+  "Sewing",
+  "Other"
+];
+
+const MONITORING_TABLES = {
+  materials: {
+    title: "A. Materials Received & Used",
+    addLabel: "Add Material",
+    columns: [
+      { name: "entry_date", label: "Date", input: "date" },
+      { name: "materials_received", label: "Materials Received", input: "text" },
+      { name: "quantity", label: "Quantity", input: "text" },
+      { name: "materials_used", label: "Materials Used", input: "text" },
+      { name: "inventory", label: "Inventory", input: "text" }
+    ]
+  },
+  sales: {
+    title: "B. Production & Sales",
+    addLabel: "Add Sale",
+    columns: [
+      { name: "entry_date", label: "Date", input: "date" },
+      { name: "quantity_produced", label: "Quantity Produced", input: "text" },
+      { name: "quantity_sold", label: "Quantity Sold", input: "text" },
+      { name: "price_per_unit", label: "Price per Unit", input: "number" },
+      { name: "total_sales", label: "Total Sales (P)", input: "number" }
+    ]
+  },
+  expenses: {
+    title: "C. Expenses",
+    addLabel: "Add Expense",
+    columns: [
+      { name: "entry_date", label: "Date", input: "date" },
+      { name: "payee", label: "Payee", input: "text" },
+      { name: "description", label: "Description", input: "text" },
+      { name: "amount", label: "Amount (P)", input: "number" }
+    ]
+  }
+};
+
 const PRINT_WIDE_FIELDS = new Set([
   "field_c13",
   "livelihood_interest",
@@ -147,6 +189,7 @@ const ICONS = {
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16v4Z"></path><path d="m13.5 6.5 4 4"></path></svg>',
   view: '<svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
   table: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 4v16M15 4v16"></path></svg>',
+  monitoring: '<svg viewBox="0 0 24 24"><path d="M9 3h6l1 3h3v15H5V6h3l1-3Z"></path><path d="M9 13l2 2 4-5"></path><path d="M8 18h8"></path></svg>',
   bin: '<svg viewBox="0 0 24 24"><path d="M4 7h16"></path><path d="M10 11v6M14 11v6"></path><path d="m6 7 1 14h10l1-14"></path><path d="M9 7V4h6v3"></path></svg>',
   save: '<svg viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5V3Z"></path><path d="M8 3v6h8V3"></path><path d="M8 21v-7h8v7"></path></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>',
@@ -162,6 +205,8 @@ const state = {
   fieldMap: {},
   stats: null,
   currentRecord: null,
+  currentMonitoringReport: null,
+  monitoringBeneficiaries: [],
   pictureData: "",
   route: "menu",
   routeId: "",
@@ -384,6 +429,7 @@ async function renderRoute() {
     else if (parsed.route === "editor") await renderEditorPage(parsed.id);
     else if (parsed.route === "viewer") await renderViewerPage(parsed.id);
     else if (parsed.route === "database") await renderDatabasePage();
+    else if (parsed.route === "monitoring") await renderMonitoringPage(parsed.id);
     else if (parsed.route === "bin") await renderBinPage();
     else await renderMenuPage();
   } catch (error) {
@@ -763,11 +809,15 @@ async function renderMenuPage() {
         <span>Active Records</span>
         <strong>${stats.active}</strong>
       </button>
+      <button type="button" class="stat-card blue" data-menu-route="monitoring">
+        <span>Monitoring Reports</span>
+        <strong>${stats.monitoringReports || 0}</strong>
+      </button>
       <button type="button" class="stat-card accent" data-menu-route="bin">
         <span>Record Bin</span>
         <strong>${stats.deleted}</strong>
       </button>
-      <button type="button" class="stat-card blue" data-menu-route="editor">
+      <button type="button" class="stat-card" data-menu-route="editor">
         <span>Next Control No.</span>
         <strong id="nextControlNo">...</strong>
       </button>
@@ -780,6 +830,7 @@ async function renderMenuPage() {
       ${menuTile("editor", "edit", "New Application")}
       ${menuTile("viewer", "view", "Record Viewer")}
       ${menuTile("database", "table", "Database Table")}
+      ${menuTile("monitoring", "monitoring", "Monitoring Reports")}
     </section>
 
     <section class="split-layout">
@@ -879,6 +930,862 @@ async function renderSearchPage() {
   });
 
   await runSearch();
+}
+
+function formatMoney(value) {
+  const number = Number(value || 0);
+  return `PHP ${number.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function moneyInputValue(value) {
+  const number = Number(value || 0);
+  return number ? String(number) : "";
+}
+
+function parseMoneyInput(value) {
+  const number = Number(String(value || "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function currentReportMonth() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function reportMonthLabel(value) {
+  const [year, month] = String(value || "").split("-").map(Number);
+  if (!year || !month) return value || "No Month";
+
+  return new Date(year, month - 1, 1).toLocaleString("en-US", {
+    month: "long",
+    year: "numeric"
+  });
+}
+
+function blankMonitoringReport() {
+  return {
+    beneficiary_id: "",
+    control_no: "",
+    beneficiary_name: "",
+    chapel: "",
+    contact_no: "",
+    project_type: "",
+    report_month: currentReportMonth(),
+    forwarded_balance: 0,
+    total_sales: 0,
+    total_expenses: 0,
+    net_income: 0,
+    materials: [],
+    sales: [],
+    expenses: [],
+    challenges: "",
+    success_stories: "",
+    prepared_by: "",
+    prepared_date: "",
+    checked_by: "",
+    checked_date: ""
+  };
+}
+
+function projectFromBeneficiary(record = {}) {
+  const text = `${record.livelihood_interest || ""} ${record.field_e32 || ""} ${record.field_j33 || ""}`.toLowerCase();
+  if (text.includes("dishwashing")) return "Dishwashing Liquid Production";
+  if (text.includes("rag") || text.includes("rug")) return "Rag Making";
+  if (text.includes("sewing")) return "Sewing";
+  return "";
+}
+
+async function loadMonitoringBeneficiaries() {
+  const payload = await api("/api/records?limit=200&detail=full");
+  state.monitoringBeneficiaries = payload.records || [];
+  return state.monitoringBeneficiaries;
+}
+
+async function loadMonitoringReport(id) {
+  const payload = await api(`/api/monitoring/reports/${id}`);
+  return payload.report;
+}
+
+function monitoringOverview(reports) {
+  const totals = reports.reduce((summary, report) => {
+    summary.sales += Number(report.total_sales || 0);
+    summary.expenses += Number(report.total_expenses || 0);
+    summary.net += Number(report.net_income || 0);
+    summary.months.add(report.report_month);
+    return summary;
+  }, { sales: 0, expenses: 0, net: 0, months: new Set() });
+  const monthCounts = countBy(reports, report => reportMonthLabel(report.report_month));
+
+  return {
+    count: reports.length,
+    sales: totals.sales,
+    expenses: totals.expenses,
+    net: totals.net,
+    months: totals.months.size,
+    monthCounts
+  };
+}
+
+function renderMonitoringOverview(reports) {
+  const overview = monitoringOverview(reports);
+
+  return `
+    <section class="monitoring-overview">
+      <div class="analytics-title-row">
+        <div>
+          <span class="analytics-eyebrow">Monitoring Dashboard</span>
+          <h3>Monthly Reports Summary</h3>
+        </div>
+        <span class="analytics-note">${overview.months} month${overview.months === 1 ? "" : "s"} covered</span>
+      </div>
+      <div class="analytics-kpi-grid">
+        ${renderAnalyticsKpi("Reports Filed", String(overview.count), "Submitted monthly forms", "green")}
+        ${renderAnalyticsKpi("Total Sales", formatMoney(overview.sales), "Production and sales", "blue")}
+        ${renderAnalyticsKpi("Total Expenses", formatMoney(overview.expenses), "Reported expenses", "amber")}
+        ${renderAnalyticsKpi("Net Income", formatMoney(overview.net), "Balance plus sales less expenses", "violet")}
+      </div>
+      <div class="analytics-preview-grid">
+        ${renderAnalyticsCard("Reports by Month", "Monthly submission volume", renderBarList(overview.monthCounts, overview.count, 6))}
+        ${renderAnalyticsCard("Financial Position", "All monitoring reports", `
+          <div class="finance-summary">
+            <div><span>Sales</span><strong>${escapeHtml(formatMoney(overview.sales))}</strong></div>
+            <div><span>Expenses</span><strong>${escapeHtml(formatMoney(overview.expenses))}</strong></div>
+            <div><span>Net</span><strong>${escapeHtml(formatMoney(overview.net))}</strong></div>
+          </div>
+        `)}
+      </div>
+    </section>
+  `;
+}
+
+async function renderMonitoringPage(id = "") {
+  if (id && id !== "new") {
+    await renderMonitoringEditorPage(id);
+    return;
+  }
+
+  if (id === "new") {
+    await renderMonitoringEditorPage("");
+    return;
+  }
+
+  setTitle("Monitoring");
+  setTopbarActions([
+    { id: "monitoringNew", label: "New Report", icon: "plus", variant: "primary", onClick: () => navigate("monitoring", "new") }
+  ]);
+
+  const payload = await api("/api/monitoring/reports?limit=500");
+  const reports = payload.reports || [];
+
+  elements.pageRoot.innerHTML = `
+    ${renderMonitoringOverview(reports)}
+    <section class="monitoring-page">
+      <div class="table-toolbar">
+        <div class="search-band compact">
+          <span class="search-icon">${icon("search")}</span>
+          <input id="monitoringSearchInput" type="search" placeholder="Filter monitoring reports">
+          <button id="monitoringSearchButton" type="button" class="action-button">
+            <span class="button-icon">${icon("search")}</span>
+            <span>Search</span>
+          </button>
+        </div>
+        <span id="monitoringCount" class="table-count"></span>
+      </div>
+      <div id="monitoringListHost" class="monitoring-list-host"></div>
+    </section>
+  `;
+
+  async function loadReports() {
+    const search = encodeURIComponent(document.getElementById("monitoringSearchInput").value.trim());
+    const reportPayload = await api(`/api/monitoring/reports?search=${search}&limit=500`);
+    renderMonitoringList(reportPayload.reports || []);
+  }
+
+  document.getElementById("monitoringSearchButton").addEventListener("click", () => loadReports().catch(error => showToast(error.message)));
+  document.getElementById("monitoringSearchInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadReports().catch(error => showToast(error.message));
+    }
+  });
+
+  renderMonitoringList(reports);
+}
+
+function renderMonitoringList(reports) {
+  document.getElementById("monitoringCount").textContent = `${reports.length} shown`;
+
+  if (!reports.length) {
+    document.getElementById("monitoringListHost").innerHTML = emptyState("No monitoring reports yet.");
+    return;
+  }
+
+  document.getElementById("monitoringListHost").innerHTML = `
+    <div class="data-table-scroll">
+      <table class="data-table monitoring-table">
+        <thead>
+          <tr>
+            <th class="sticky-column">Actions</th>
+            <th>Month</th>
+            <th>Beneficiary</th>
+            <th>Application No.</th>
+            <th>Project</th>
+            <th>Sales</th>
+            <th>Expenses</th>
+            <th>Net Income</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${reports.map(report => `
+            <tr>
+              <td class="sticky-column">
+                <div class="table-actions">
+                  <button type="button" class="icon-button" title="Edit" data-monitoring-edit-id="${report.id}">${icon("edit")}</button>
+                  <button type="button" class="icon-button" title="Print" data-monitoring-print-id="${report.id}">${icon("print")}</button>
+                </div>
+              </td>
+              <td>${escapeHtml(reportMonthLabel(report.report_month))}</td>
+              <td>${escapeHtml(report.beneficiary_name || "")}</td>
+              <td>${escapeHtml(report.control_no || "")}</td>
+              <td>${escapeHtml(report.project_type || "")}</td>
+              <td>${escapeHtml(formatMoney(report.total_sales))}</td>
+              <td>${escapeHtml(formatMoney(report.total_expenses))}</td>
+              <td>${escapeHtml(formatMoney(report.net_income))}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+  attachMonitoringReportHandlers(elements.pageRoot);
+}
+
+function attachMonitoringReportHandlers(scope = document) {
+  scope.querySelectorAll("[data-monitoring-edit-id]").forEach(button => {
+    button.addEventListener("click", () => navigate("monitoring", button.dataset.monitoringEditId));
+  });
+  scope.querySelectorAll("[data-monitoring-print-id]").forEach(button => {
+    button.addEventListener("click", async () => {
+      try {
+        const report = await loadMonitoringReport(button.dataset.monitoringPrintId);
+        printMonitoringReport(report);
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  });
+}
+
+async function renderMonitoringEditorPage(id = "") {
+  setTitle(id ? "Monitoring Report" : "New Monitoring Report");
+  const [report] = await Promise.all([
+    id ? loadMonitoringReport(id) : Promise.resolve(blankMonitoringReport()),
+    loadMonitoringBeneficiaries()
+  ]);
+  state.currentMonitoringReport = report;
+
+  setTopbarActions([
+    { id: "monitoringBack", label: "Reports", icon: "table", onClick: () => navigate("monitoring") },
+    { id: "monitoringSave", label: "Save", icon: "save", variant: "primary", onClick: () => saveCurrentMonitoringReport().catch(error => showToast(error.message)) },
+    ...(id ? [
+      { id: "monitoringPrint", label: "Print", icon: "print", onClick: () => printMonitoringReport(collectMonitoringReport()) },
+      { id: "monitoringDelete", label: "Delete", icon: "bin", variant: "danger", onClick: () => deleteCurrentMonitoringReport(id).catch(error => showToast(error.message)) }
+    ] : [])
+  ]);
+
+  elements.pageRoot.innerHTML = renderMonitoringForm(report);
+  attachMonitoringFormHandlers();
+  recalculateMonitoringTotals();
+}
+
+function monitoringBeneficiaryOption(record, selectedId) {
+  const label = `${record.control_no || ""} | ${fullName(record)}`;
+  return `<option value="${record.id}" ${Number(selectedId) === Number(record.id) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+}
+
+function renderMonitoringForm(report) {
+  const selectedId = Number(report.beneficiary_id || 0);
+  const hasSelected = state.monitoringBeneficiaries.some(record => Number(record.id) === selectedId);
+  const projectOptions = [...MONITORING_PROJECT_OPTIONS];
+  if (report.project_type && !projectOptions.includes(report.project_type)) projectOptions.push(report.project_type);
+
+  return `
+    <section class="application-paper monitoring-paper editable">
+      <div class="monitoring-heading">
+        <img src="/assets/paofi-logo.png" alt="">
+        <div>
+          <h2>Payatas Orione Foundation Inc.</h2>
+          <h3>Livelihood Project Monitoring & Reporting Form</h3>
+        </div>
+      </div>
+
+      <div class="monitoring-identity-grid">
+        <div class="paper-field wide">
+          <label for="monitoringBeneficiary">Name of Beneficiary</label>
+          <select id="monitoringBeneficiary" data-monitoring-field="beneficiary_id">
+            <option value="" ${selectedId ? "" : "selected"}></option>
+            ${!hasSelected && selectedId ? `<option value="${selectedId}" selected>${escapeHtml(`${report.control_no || ""} | ${report.beneficiary_name || ""}`)}</option>` : ""}
+            ${state.monitoringBeneficiaries.map(record => monitoringBeneficiaryOption(record, selectedId)).join("")}
+          </select>
+        </div>
+        <div class="paper-field">
+          <label for="monitoringMonth">For the Month Of</label>
+          <input id="monitoringMonth" type="month" data-monitoring-field="report_month" value="${escapeHtml(report.report_month || currentReportMonth())}">
+        </div>
+        <div class="paper-field wide">
+          <label for="monitoringProject">Project</label>
+          <select id="monitoringProject" data-monitoring-field="project_type">
+            <option value="" ${report.project_type ? "" : "selected"}></option>
+            ${projectOptions.map(option => `<option value="${escapeHtml(option)}" ${option === report.project_type ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+          </select>
+        </div>
+        ${monitoringField("Application No.", "control_no", report.control_no, { readonly: true })}
+        ${monitoringField("Beneficiary Name", "beneficiary_name", report.beneficiary_name, { readonly: true })}
+        ${monitoringField("Chapel", "chapel", report.chapel)}
+        ${monitoringField("Contact No.", "contact_no", report.contact_no, { numeric: true })}
+      </div>
+
+      ${renderMonitoringEntryTable("materials", report.materials || [])}
+      ${renderMonitoringEntryTable("sales", report.sales || [])}
+      ${renderMonitoringEntryTable("expenses", report.expenses || [])}
+
+      <section class="paper-section monitoring-summary-section">
+        <h3>D. Income & Expenses</h3>
+        <div class="income-grid">
+          <div class="paper-field">
+            <label for="forwardedBalance">Forwarded Balance (last month)</label>
+            <input id="forwardedBalance" type="number" step="0.01" data-monitoring-field="forwarded_balance" value="${escapeHtml(moneyInputValue(report.forwarded_balance))}">
+          </div>
+          <div class="paper-field">
+            <label>Add (B) Sales</label>
+            <div class="display-value" id="monitoringTotalSales">${escapeHtml(formatMoney(report.total_sales))}</div>
+          </div>
+          <div class="paper-field">
+            <label>Less (C) Expenses</label>
+            <div class="display-value" id="monitoringTotalExpenses">${escapeHtml(formatMoney(report.total_expenses))}</div>
+          </div>
+          <div class="paper-field">
+            <label>Net Income</label>
+            <div class="display-value strong-value" id="monitoringNetIncome">${escapeHtml(formatMoney(report.net_income))}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="paper-section">
+        <h3>E. Challenges / Issues Encountered</h3>
+        <textarea rows="3" data-monitoring-field="challenges" data-capitalize="words" autocapitalize="words">${escapeHtml(report.challenges || "")}</textarea>
+      </section>
+
+      <section class="paper-section">
+        <h3>F. Success Stories / Good Practices</h3>
+        <textarea rows="3" data-monitoring-field="success_stories" data-capitalize="words" autocapitalize="words">${escapeHtml(report.success_stories || "")}</textarea>
+      </section>
+
+      <section class="paper-section">
+        <div class="signature-grid">
+          <div>
+            <h3>Prepared by</h3>
+            ${monitoringField("Name and Signature", "prepared_by", report.prepared_by)}
+            ${monitoringField("Date", "prepared_date", report.prepared_date, { type: "date" })}
+          </div>
+          <div>
+            <h3>Received and Checked</h3>
+            ${monitoringField("Name and Signature", "checked_by", report.checked_by)}
+            ${monitoringField("Date", "checked_date", report.checked_date, { type: "date" })}
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function monitoringField(label, name, value, options = {}) {
+  const type = options.type || "text";
+  const numeric = options.numeric ? ' inputmode="numeric"' : "";
+  const readonly = options.readonly ? " readonly" : "";
+  const capitalize = !options.numeric && type !== "date" ? ' data-capitalize="words" autocapitalize="words"' : "";
+
+  return `
+    <div class="paper-field">
+      <label for="monitoring_${escapeHtml(name)}">${escapeHtml(label)}</label>
+      <input id="monitoring_${escapeHtml(name)}" type="${type}" data-monitoring-field="${escapeHtml(name)}" value="${escapeHtml(value || "")}"${numeric}${readonly}${capitalize}>
+    </div>
+  `;
+}
+
+function renderMonitoringEntryTable(type, rows) {
+  const table = MONITORING_TABLES[type];
+  const body = rows.length
+    ? rows.map((row, index) => renderMonitoringEntryRow(type, row, index)).join("")
+    : `<tr class="monitoring-empty-row"><td colspan="${table.columns.length + 1}">No entries added.</td></tr>`;
+
+  return `
+    <section class="paper-section monitoring-entry-section">
+      <div class="family-section-header">
+        <h3>${escapeHtml(table.title)}</h3>
+        <button type="button" class="action-button compact-action" data-add-monitoring-row="${escapeHtml(type)}">
+          <span class="button-icon">${icon("plus")}</span>
+          <span>${escapeHtml(table.addLabel)}</span>
+        </button>
+      </div>
+      <div class="data-table-scroll monitoring-table-wrap">
+        <table class="family-table monitoring-entry-table">
+          <thead>
+            <tr>${table.columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}<th class="row-remove-head"></th></tr>
+          </thead>
+          <tbody data-monitoring-table-body="${escapeHtml(type)}">
+            ${body}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderMonitoringEntryRow(type, row = {}, index = 0) {
+  const table = MONITORING_TABLES[type];
+
+  return `
+    <tr data-monitoring-row-container="${escapeHtml(type)}" data-monitoring-row-index="${index}">
+      ${table.columns.map(column => `
+        <td>
+          ${renderMonitoringEntryInput(type, column, row[column.name] || "", index)}
+        </td>
+      `).join("")}
+      <td class="row-remove-cell">
+        <button type="button" class="icon-button" title="Remove row" data-remove-monitoring-row="${escapeHtml(type)}" data-monitoring-row-index="${index}">
+          ${icon("bin")}
+        </button>
+      </td>
+    </tr>
+  `;
+}
+
+function renderMonitoringEntryInput(type, column, value, index) {
+  const numberAttrs = column.input === "number" ? ' step="0.01"' : "";
+  const normalizedValue = column.input === "number" ? moneyInputValue(value) : value;
+  const capitalize = column.input === "text" && !["quantity", "inventory", "quantity_produced", "quantity_sold"].includes(column.name)
+    ? ' data-capitalize="words" autocapitalize="words"'
+    : "";
+
+  return `
+    <input
+      type="${column.input || "text"}"
+      data-monitoring-table="${escapeHtml(type)}"
+      data-monitoring-row="${index}"
+      data-monitoring-column="${escapeHtml(column.name)}"
+      value="${escapeHtml(normalizedValue || "")}"${numberAttrs}${capitalize}>
+  `;
+}
+
+function nextMonitoringRowIndex(type) {
+  const indexes = [...elements.pageRoot.querySelectorAll(`[data-monitoring-row-container="${type}"]`)]
+    .map(row => Number(row.dataset.monitoringRowIndex))
+    .filter(Number.isFinite);
+
+  return indexes.length ? Math.max(...indexes) + 1 : 0;
+}
+
+function addMonitoringEntryRow(type) {
+  const body = elements.pageRoot.querySelector(`[data-monitoring-table-body="${type}"]`);
+  if (!body) return;
+
+  body.querySelector(".monitoring-empty-row")?.remove();
+  const rowIndex = nextMonitoringRowIndex(type);
+  body.insertAdjacentHTML("beforeend", renderMonitoringEntryRow(type, {}, rowIndex));
+  attachCapitalizationHandlers(body.rows[body.rows.length - 1]);
+  attachMonitoringRowHandlers(body.rows[body.rows.length - 1]);
+}
+
+function removeMonitoringEntryRow(button) {
+  const row = button.closest("tr");
+  const type = button.dataset.removeMonitoringRow;
+  const body = elements.pageRoot.querySelector(`[data-monitoring-table-body="${type}"]`);
+  row?.remove();
+
+  if (body && !body.querySelector("[data-monitoring-row-container]")) {
+    body.innerHTML = `<tr class="monitoring-empty-row"><td colspan="${MONITORING_TABLES[type].columns.length + 1}">No entries added.</td></tr>`;
+  }
+
+  recalculateMonitoringTotals();
+}
+
+function collectMonitoringRows(type) {
+  const rows = new Map();
+
+  elements.pageRoot.querySelectorAll(`[data-monitoring-table="${type}"]`).forEach(input => {
+    const rowIndex = Number(input.dataset.monitoringRow);
+    if (!Number.isFinite(rowIndex)) return;
+    if (!rows.has(rowIndex)) rows.set(rowIndex, {});
+    rows.get(rowIndex)[input.dataset.monitoringColumn] = input.value;
+  });
+
+  return [...rows.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, row]) => row)
+    .filter(row => Object.values(row).some(value => String(value || "").trim()));
+}
+
+function collectMonitoringReport() {
+  const report = {};
+  if (state.currentMonitoringReport?.id) report.id = state.currentMonitoringReport.id;
+
+  elements.pageRoot.querySelectorAll("[data-monitoring-field]").forEach(input => {
+    report[input.dataset.monitoringField] = input.value;
+  });
+
+  report.materials = collectMonitoringRows("materials");
+  report.sales = collectMonitoringRows("sales");
+  report.expenses = collectMonitoringRows("expenses");
+  return report;
+}
+
+function updateMonitoringBeneficiarySnapshot() {
+  const select = document.getElementById("monitoringBeneficiary");
+  const beneficiary = state.monitoringBeneficiaries.find(record => Number(record.id) === Number(select?.value || 0));
+  if (!beneficiary) return;
+
+  const values = {
+    control_no: beneficiary.control_no || "",
+    beneficiary_name: fullName(beneficiary),
+    chapel: fieldValue("field_c12", beneficiary.field_c12),
+    contact_no: fieldValue("field_l11", beneficiary.field_l11)
+  };
+
+  Object.entries(values).forEach(([name, value]) => {
+    const input = elements.pageRoot.querySelector(`[data-monitoring-field="${name}"]`);
+    if (input) input.value = value;
+  });
+
+  const projectInput = elements.pageRoot.querySelector('[data-monitoring-field="project_type"]');
+  if (projectInput && !projectInput.value) {
+    projectInput.value = projectFromBeneficiary(beneficiary);
+  }
+}
+
+function recalculateMonitoringTotals() {
+  elements.pageRoot.querySelectorAll('[data-monitoring-table="sales"]').forEach(input => {
+    if (!["quantity_sold", "price_per_unit"].includes(input.dataset.monitoringColumn)) return;
+
+    const row = input.closest("tr");
+    const quantity = parseMoneyInput(row?.querySelector('[data-monitoring-column="quantity_sold"]')?.value);
+    const price = parseMoneyInput(row?.querySelector('[data-monitoring-column="price_per_unit"]')?.value);
+    const totalInput = row?.querySelector('[data-monitoring-column="total_sales"]');
+    if (totalInput && quantity && price) totalInput.value = String(quantity * price);
+  });
+
+  const totalSales = [...elements.pageRoot.querySelectorAll('[data-monitoring-table="sales"][data-monitoring-column="total_sales"]')]
+    .reduce((sum, input) => sum + parseMoneyInput(input.value), 0);
+  const totalExpenses = [...elements.pageRoot.querySelectorAll('[data-monitoring-table="expenses"][data-monitoring-column="amount"]')]
+    .reduce((sum, input) => sum + parseMoneyInput(input.value), 0);
+  const forwardedBalance = parseMoneyInput(elements.pageRoot.querySelector('[data-monitoring-field="forwarded_balance"]')?.value);
+  const netIncome = forwardedBalance + totalSales - totalExpenses;
+
+  const salesTarget = document.getElementById("monitoringTotalSales");
+  const expensesTarget = document.getElementById("monitoringTotalExpenses");
+  const netTarget = document.getElementById("monitoringNetIncome");
+  if (salesTarget) salesTarget.textContent = formatMoney(totalSales);
+  if (expensesTarget) expensesTarget.textContent = formatMoney(totalExpenses);
+  if (netTarget) netTarget.textContent = formatMoney(netIncome);
+}
+
+function attachMonitoringRowHandlers(root = elements.pageRoot) {
+  root.querySelectorAll("[data-remove-monitoring-row]").forEach(button => {
+    button.addEventListener("click", () => removeMonitoringEntryRow(button));
+  });
+  root.querySelectorAll('[data-monitoring-table="sales"], [data-monitoring-table="expenses"], [data-monitoring-field="forwarded_balance"]').forEach(input => {
+    input.addEventListener("input", recalculateMonitoringTotals);
+  });
+}
+
+function attachMonitoringFormHandlers() {
+  document.getElementById("monitoringBeneficiary")?.addEventListener("change", updateMonitoringBeneficiarySnapshot);
+  elements.pageRoot.querySelectorAll("[data-add-monitoring-row]").forEach(button => {
+    button.addEventListener("click", () => addMonitoringEntryRow(button.dataset.addMonitoringRow));
+  });
+  elements.pageRoot.querySelectorAll('[data-monitoring-field="contact_no"]').forEach(input => {
+    input.addEventListener("input", () => {
+      input.value = normalizeContactNumber(input.value);
+    });
+  });
+  attachCapitalizationHandlers(elements.pageRoot);
+  attachMonitoringRowHandlers(elements.pageRoot);
+}
+
+async function saveCurrentMonitoringReport() {
+  const report = collectMonitoringReport();
+
+  if (!report.beneficiary_id) {
+    showToast("Select a beneficiary.");
+    return;
+  }
+
+  if (!report.report_month) {
+    showToast("Report month is required.");
+    return;
+  }
+
+  const payload = await api("/api/monitoring/reports", {
+    method: "POST",
+    body: JSON.stringify(report)
+  });
+
+  await refreshStats();
+  showToast("Monitoring report saved.");
+  history.replaceState(null, "", `#/monitoring/${payload.report.id}`);
+  await renderMonitoringPage(String(payload.report.id));
+}
+
+async function deleteCurrentMonitoringReport(id) {
+  const report = state.currentMonitoringReport || await loadMonitoringReport(id);
+  const confirmed = window.confirm(`Delete this monitoring report?\n\n${report.control_no}\n${reportMonthLabel(report.report_month)}`);
+  if (!confirmed) return;
+
+  await api(`/api/monitoring/reports/${id}`, { method: "DELETE" });
+  await refreshStats();
+  showToast("Monitoring report deleted.");
+  navigate("monitoring");
+}
+
+function printMonitoringRows(rows, columns, totalLabel = "", totalValue = "") {
+  const rowHtml = rows.length
+    ? rows.map(row => `<tr>${columns.map(column => `<td>${escapeHtml(column.format ? column.format(row[column.name]) : row[column.name] || "")}</td>`).join("")}</tr>`).join("")
+    : `<tr>${columns.map(() => "<td>&nbsp;</td>").join("")}</tr>`;
+
+  return `
+    ${rowHtml}
+    ${totalLabel ? `<tr class="total-row"><td colspan="${columns.length - 1}">${escapeHtml(totalLabel)}</td><td>${escapeHtml(totalValue)}</td></tr>` : ""}
+  `;
+}
+
+function printMonitoringReport(report) {
+  const printWindow = window.open("", "_blank", "width=940,height=760");
+  if (!printWindow) {
+    showToast("Allow popups to print reports.");
+    return;
+  }
+
+  const logoSrc = `${window.location.origin}/assets/paofi-logo.png`;
+  const salesColumns = MONITORING_TABLES.sales.columns.map(column => ({
+    ...column,
+    format: ["price_per_unit", "total_sales"].includes(column.name) ? formatMoney : value => value
+  }));
+  const expenseColumns = MONITORING_TABLES.expenses.columns.map(column => ({
+    ...column,
+    format: column.name === "amount" ? formatMoney : value => value
+  }));
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>${escapeHtml(report.control_no || "Monitoring Report")} ${escapeHtml(report.report_month || "")}</title>
+        <style>
+          @page { size: letter; margin: 8mm; }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            color: #1d2520;
+            background: #edf3ef;
+            font-family: "Segoe UI", Arial, sans-serif;
+            font-size: 10px;
+          }
+          button {
+            margin: 12px;
+            border: 1px solid #bdd3c6;
+            border-radius: 7px;
+            background: #ffffff;
+            padding: 8px 12px;
+            color: #155b3c;
+            font-weight: 700;
+          }
+          .sheet {
+            width: 8.5in;
+            min-height: 11in;
+            margin: 0 auto;
+            padding: 0.28in;
+            background: #ffffff;
+          }
+          h1, h2, h3, p { margin: 0; }
+          .header {
+            display: grid;
+            grid-template-columns: 58px 1fr;
+            gap: 10px;
+            align-items: center;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #1f7a4f;
+            text-align: center;
+          }
+          .header img {
+            width: 54px;
+            height: 54px;
+            object-fit: contain;
+          }
+          .header h1 {
+            font-size: 15px;
+          }
+          .header h2 {
+            font-size: 14px;
+          }
+          .project {
+            margin: 12px 0 8px;
+            text-align: center;
+            font-size: 13px;
+          }
+          .identity {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px 14px;
+            margin-bottom: 12px;
+          }
+          .identity div {
+            border-bottom: 1px solid #98a69e;
+            padding: 2px 0;
+          }
+          .identity span {
+            color: #5b6861;
+            font-weight: 700;
+          }
+          section {
+            break-inside: avoid;
+            margin-top: 10px;
+          }
+          section h3 {
+            margin-bottom: 4px;
+            font-size: 11px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+          }
+          th, td {
+            border: 1px solid #8fa098;
+            padding: 4px;
+            min-height: 22px;
+            text-align: left;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+          }
+          th {
+            background: #eef7f1;
+            text-align: center;
+            font-weight: 800;
+          }
+          .total-row td {
+            font-weight: 800;
+            text-align: right;
+          }
+          .income td:first-child {
+            width: 68%;
+            font-weight: 700;
+          }
+          .lines {
+            min-height: 42px;
+            border-bottom: 1px solid #98a69e;
+            padding: 4px 0;
+            white-space: pre-wrap;
+          }
+          .signatures {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 70px;
+            margin-top: 34px;
+          }
+          .signature-line {
+            margin-top: 36px;
+            border-top: 1px solid #1d2520;
+            padding-top: 4px;
+            text-align: center;
+            font-weight: 700;
+          }
+          @media print {
+            body { background: #ffffff; }
+            button { display: none; }
+            .sheet {
+              width: auto;
+              min-height: auto;
+              margin: 0;
+              padding: 0;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <button onclick="window.print()">Print</button>
+        <main class="sheet">
+          <header class="header">
+            <img src="${escapeHtml(logoSrc)}" alt="">
+            <div>
+              <h1>Payatas Orione Foundation, Inc.</h1>
+              <h2>Livelihood Project Monitoring & Reporting Form</h2>
+            </div>
+          </header>
+          <h2 class="project">${escapeHtml(report.project_type || "")}</h2>
+          <div class="identity">
+            <div><span>For the month of:</span> ${escapeHtml(reportMonthLabel(report.report_month))}</div>
+            <div><span>Chapel:</span> ${escapeHtml(report.chapel || "")}</div>
+            <div><span>Name of Beneficiary:</span> ${escapeHtml(report.beneficiary_name || "")}</div>
+            <div><span>Contact No.:</span> ${escapeHtml(report.contact_no || "")}</div>
+            <div><span>Application No.:</span> ${escapeHtml(report.control_no || "")}</div>
+          </div>
+          <section>
+            <h3>A. Materials Received & Used</h3>
+            <table>
+              <thead><tr>${MONITORING_TABLES.materials.columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+              <tbody>${printMonitoringRows(report.materials || [], MONITORING_TABLES.materials.columns)}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3>B. Production & Sales</h3>
+            <table>
+              <thead><tr>${MONITORING_TABLES.sales.columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+              <tbody>${printMonitoringRows(report.sales || [], salesColumns, "Total", formatMoney(report.total_sales))}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3>C. Expenses</h3>
+            <table>
+              <thead><tr>${MONITORING_TABLES.expenses.columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+              <tbody>${printMonitoringRows(report.expenses || [], expenseColumns, "Total", formatMoney(report.total_expenses))}</tbody>
+            </table>
+          </section>
+          <section>
+            <h3>D. Income & Expenses</h3>
+            <table class="income">
+              <tbody>
+                <tr><td>Forwarded Balance (last month)</td><td>${escapeHtml(formatMoney(report.forwarded_balance))}</td></tr>
+                <tr><td>Add (B) Sales</td><td>${escapeHtml(formatMoney(report.total_sales))}</td></tr>
+                <tr><td>Less (C) Expenses</td><td>${escapeHtml(formatMoney(report.total_expenses))}</td></tr>
+                <tr><td>Net Income</td><td>${escapeHtml(formatMoney(report.net_income))}</td></tr>
+              </tbody>
+            </table>
+          </section>
+          <section>
+            <h3>E. Challenges / Issues Encountered</h3>
+            <div class="lines">${escapeHtml(report.challenges || "")}</div>
+          </section>
+          <section>
+            <h3>F. Success Stories / Good Practices</h3>
+            <div class="lines">${escapeHtml(report.success_stories || "")}</div>
+          </section>
+          <div class="signatures">
+            <div>
+              <strong>Prepared by:</strong>
+              <div class="signature-line">${escapeHtml(report.prepared_by || "Name and Signature")}</div>
+              <p>Date: ${escapeHtml(report.prepared_date || "")}</p>
+            </div>
+            <div>
+              <strong>Received and Checked</strong>
+              <div class="signature-line">${escapeHtml(report.checked_by || "Name and Signature")}</div>
+              <p>Date: ${escapeHtml(report.checked_date || "")}</p>
+            </div>
+          </div>
+        </main>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
 }
 
 async function renderEditorPage(id = "") {

@@ -165,6 +165,49 @@ function createServer(database) {
         return;
       }
 
+      if (pathname === "/api/monitoring/reports" && req.method === "GET") {
+        sendJson(res, 200, {
+          reports: await database.listMonitoringReports({
+            search: url.searchParams.get("search") || "",
+            beneficiaryId: url.searchParams.get("beneficiaryId") || "",
+            limit: url.searchParams.get("limit") || 200
+          })
+        });
+        return;
+      }
+
+      if (pathname === "/api/monitoring/reports" && req.method === "POST") {
+        const payload = await readJsonBody(req);
+        sendJson(res, 200, { report: await database.saveMonitoringReport(payload) });
+        return;
+      }
+
+      if (pathname.startsWith("/api/monitoring/reports/") && req.method === "GET") {
+        const id = recordIdFromPath(pathname, "/api/monitoring/reports/");
+        const report = id ? await database.getMonitoringReport(id) : null;
+
+        if (!report) {
+          sendError(res, 404, "Monitoring report was not found.");
+          return;
+        }
+
+        sendJson(res, 200, { report });
+        return;
+      }
+
+      if (pathname.startsWith("/api/monitoring/reports/") && req.method === "DELETE") {
+        const id = recordIdFromPath(pathname, "/api/monitoring/reports/");
+        const report = id ? await database.deleteMonitoringReport(id) : null;
+
+        if (!report) {
+          sendError(res, 404, "Monitoring report was not found.");
+          return;
+        }
+
+        sendJson(res, 200, { report });
+        return;
+      }
+
       if (pathname === "/api/bin" && req.method === "GET") {
         sendJson(res, 200, { records: await database.listDeletedRecords() });
         return;
