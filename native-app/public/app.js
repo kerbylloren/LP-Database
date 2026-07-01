@@ -2720,6 +2720,9 @@ async function initialize() {
   elements.navItems.forEach(item => {
     item.addEventListener("click", () => navigate(item.dataset.route));
   });
+  window.addEventListener("lpdb:update-status", event => {
+    showToast(event.detail || "Downloading update...");
+  });
   window.addEventListener("hashchange", renderRoute);
 
   if (!location.hash) {

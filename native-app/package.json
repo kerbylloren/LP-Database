@@ -1,6 +1,6 @@
 {
   "name": "lp-database-native",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "Desktop database app for LP beneficiary records.",
   "author": {
@@ -22,7 +22,8 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@libsql/client": "^0.17.4"
+    "@libsql/client": "^0.17.4",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^43.0.0",
@@ -33,6 +34,14 @@
     "productName": "PAOFI LP Database",
     "copyright": "Copyright (c) 2026 Kerby Lloren",
     "asar": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kerbylloren",
+        "repo": "LP-Database",
+        "releaseType": "release"
+      }
+    ],
     "directories": {
       "output": "dist-electron"
     },

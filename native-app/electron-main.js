@@ -2,6 +2,7 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { createDatabase } = require("./src/database-factory");
 const { createServer } = require("./server");
 
@@ -159,6 +160,53 @@ function createWindow() {
   mainWindow.loadURL(appBaseUrl);
 }
 
+function notifyRenderer(eventName, detail) {
+  if (!mainWindow || mainWindow.webContents.isDestroyed()) return;
+
+  mainWindow.webContents.executeJavaScript(
+    `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail: ${JSON.stringify(detail)} }))`
+  ).catch(() => {});
+}
+
+function setupAutoUpdates() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("update-available", info => {
+    notifyRenderer("lpdb:update-status", `Downloading update ${info.version}...`);
+  });
+
+  autoUpdater.on("update-downloaded", async info => {
+    if (!mainWindow) return;
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      buttons: ["Restart Now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Update Ready",
+      message: `PAOFI LP Database ${info.version} has been downloaded.`,
+      detail: "Restart the application now to install the update, or install it automatically when you close the app."
+    });
+
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall(false, true);
+    }
+  });
+
+  autoUpdater.on("error", error => {
+    console.error("Auto-update failed:", error.message || error);
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(error => {
+      console.error("Auto-update check failed:", error.message || error);
+    });
+  }, 3000);
+}
+
 function stopBackend() {
   if (backendServer) {
     backendServer.close();
@@ -185,6 +233,7 @@ if (!singleInstanceLock) {
   app.whenReady()
     .then(startBackend)
     .then(createWindow)
+    .then(setupAutoUpdates)
     .catch(error => {
       dialog.showErrorBox(APP_NAME, error.message || String(error));
       app.quit();
