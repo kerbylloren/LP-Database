@@ -16,13 +16,12 @@ Latest version: `1.0.0`
 
 The release includes:
 
-- Windows x64 installer: `PAOFI-Database-Setup-<version>-x64.exe`
-- Auto-update metadata: `latest.yml`
-- Differential update map: `.exe.blockmap`
+- Windows x64 installer
+- Auto-update metadata
+- Differential update map
 
-Users on `v0.1.7` or newer can receive updates through the built-in auto-update
-flow. Users on older versions should download and run the latest installer
-manually.
+Users on supported builds can receive updates through the built-in auto-update
+flow. Older builds should download and run the latest installer manually.
 
 ## Program Roadmap
 
@@ -35,11 +34,10 @@ The application will use major version lines to track PAOFI program modules:
 
 ## Current Features
 
-- Secure login screen for app access
-- Starter `superadmin` account for account management
-- Superadmin-only user account creation and editing
-- Shared Turso cloud database support for use across multiple PCs
-- Local SQLite fallback when no cloud configuration is present
+- Sign-in screen for app access
+- Role-based access controls
+- Cloud database support for use across multiple PCs
+- Local fallback database support
 - Livelihood beneficiary record editor and viewer
 - Search page and full database table page
 - Record Bin for deleted records
@@ -50,52 +48,22 @@ The application will use major version lines to track PAOFI program modules:
 - Beneficiary-level monitoring summary in profiles and print output
 - JSON export for backup
 
-## Account Access
-
-A starter superadmin account is seeded during setup. The superadmin can create
-standard user accounts in the Accounts page. Standard users can use the database
-but cannot create or manage accounts.
-
-Passwords are stored as PBKDF2 hashes, not as plain text.
-
 ## Cloud Database
 
-The app supports Turso cloud database mode so records and user accounts can be
-accessed consistently from multiple PCs.
+The app supports cloud database mode so records and user access can stay
+consistent across approved devices. Runtime connection details are intentionally
+not documented in this public README.
 
-When cloud defaults are packaged into a release, fresh installs connect to the
-configured Turso database immediately. A local config file can also be used and
-takes priority:
-
-```text
-%LOCALAPPDATA%\PAOFI-Database-Data\cloud-database.json
-```
-
-Expected shape:
-
-```json
-{
-  "provider": "turso",
-  "url": "<TURSO_DATABASE_URL>",
-  "authToken": "<TURSO_AUTH_TOKEN>"
-}
-```
-
-Without cloud config, the app falls back to a local SQLite database.
+Without cloud configuration, the app can use a local database.
 
 ## Installation Notes
 
-Run the installer from the latest release:
+Run the installer from the latest release.
 
-```text
-PAOFI-Database-Setup-<version>-x64.exe
-```
+The installer preserves application data while removing old generated runtime or
+duplicate files during install/update.
 
-The installer preserves Turso configuration and database data while removing old
-generated runtime or duplicate files during install/update.
-
-Microsoft Defender SmartScreen may still warn because the installer is not
-signed with a trusted code-signing certificate.
+Microsoft Defender SmartScreen may still warn because the installer is unsigned.
 
 ## Development
 
@@ -138,16 +106,7 @@ npm run package:installer
 
 ## Public Release Builds
 
-For public distribution, sign the installer with a trusted Windows code-signing
-certificate issued to `Kerby Lloren`. SmartScreen reputation cannot be reliably
-fixed with package metadata alone.
-
-```powershell
-$env:CSC_LINK = "C:\path\to\kerby-lloren-code-signing.pfx"
-$env:CSC_KEY_PASSWORD = "<certificate-password>"
-npm run package:installer
-Get-AuthenticodeSignature .\dist-electron\PAOFI-Database-Setup-<version>-x64.exe
-```
+For public distribution, use a trusted Windows code-signing certificate.
 
 ## Repository Layout
 
@@ -159,8 +118,6 @@ Get-AuthenticodeSignature .\dist-electron\PAOFI-Database-Setup-<version>-x64.exe
 
 ## Data Safety
 
-- Turso credentials and local database files are ignored by Git.
+- Sensitive runtime files are not tracked by Git.
 - Deleted beneficiary records move to the Record Bin.
 - The app can export beneficiary and monitoring records as a JSON backup.
-- Account credentials are stored in the configured database, so cloud mode keeps
-  accounts consistent across devices.

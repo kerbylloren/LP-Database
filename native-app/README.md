@@ -1,95 +1,47 @@
 # PAOFI Database Native App
 
 Electron desktop application for PAOFI program records. The current production
-module covers the Livelihood Program and runs against either a local SQLite file
-or a configured Turso cloud database.
+module covers the Livelihood Program and can run with either cloud-backed data
+or a local fallback database.
 
 ## Start
 
 The standalone Windows package is built with Electron and does not use the
 user's Edge or Chrome installation.
 
-Installer:
+Build the installer:
 
 ```powershell
 npm run package:installer
 ```
 
-For a public installer, configure a trusted code-signing certificate issued to
-`Kerby Lloren` before building:
-
-```powershell
-$env:CSC_LINK = "C:\path\to\kerby-lloren-code-signing.pfx"
-$env:CSC_KEY_PASSWORD = "<certificate-password>"
-npm run package:installer
-```
-
-The output is:
-
-```text
-dist-electron\PAOFI-Database-Setup-<version>-x64.exe
-```
-
-Portable build:
+Build the portable package:
 
 ```powershell
 npm run package:standalone
 ```
 
-The output is:
-
-```text
-dist-electron\PAOFI-Database-Standalone-<version>-x64.exe
-```
-
 The installer removes old generated preview/runtime folders during
-install/update while preserving Turso config and database data. Existing data
-from the legacy `PAOFI-LP-Database-Data` folder is copied into
-`PAOFI-Database-Data` when the app starts.
+install/update while preserving application data. Existing data from legacy
+local folders is migrated into the current application data folder when needed.
 
-Or run:
+Run the local web server:
 
 ```powershell
 npm start
 ```
 
-For the desktop shell during development:
+Run the desktop shell during development:
 
 ```powershell
 npm run electron:dev
 ```
 
-Without cloud config, the app stores data in:
-
-```text
-data\lp_database.sqlite
-```
-
 ## Cloud Database
 
-For Turso cloud mode, create:
-
-```text
-%LOCALAPPDATA%\PAOFI-Database-Data\cloud-database.json
-```
-
-with this shape:
-
-```json
-{
-  "provider": "turso",
-  "url": "<TURSO_DATABASE_URL>",
-  "authToken": "<TURSO_AUTH_TOKEN>"
-}
-```
-
-From the source folder, you can also set `TURSO_DATABASE_URL` and
-`TURSO_AUTH_TOKEN`, then run:
-
-```powershell
-npm run cloud:config
-npm run migrate:cloud
-```
+Cloud database connection details are runtime-only and must not be committed or
+documented in public repository files. Use the internal deployment procedure for
+approved devices.
 
 ## Import From Google Sheets CSV
 
