@@ -1394,6 +1394,110 @@ textarea[data-capitalize="words"] {
   text-align: center;
 }
 
+.beneficiary-monitoring-summary {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, #fbfdfc 0%, #f6fbff 100%);
+}
+
+.beneficiary-monitoring-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.beneficiary-monitoring-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.beneficiary-monitoring-head > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.beneficiary-monitoring-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.beneficiary-monitoring-kpis article {
+  min-width: 0;
+  min-height: 92px;
+  display: grid;
+  align-content: space-between;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #d7e2dc;
+  border-left: 4px solid var(--green);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.beneficiary-monitoring-kpis span,
+.beneficiary-monitoring-kpis em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.beneficiary-monitoring-kpis strong {
+  color: var(--green-dark);
+  font-size: 18px;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.beneficiary-monitoring-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.beneficiary-monitoring-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.beneficiary-monitoring-table th,
+.beneficiary-monitoring-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.beneficiary-monitoring-table th {
+  color: #294235;
+  background: #eef7f1;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.beneficiary-monitoring-table td {
+  background: #ffffff;
+}
+
+.beneficiary-monitoring-empty {
+  border: 1px dashed #cbd8cf;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 24px 12px;
+  text-align: center;
+}
+
 .readonly input,
 .readonly select,
 .readonly textarea {
@@ -1593,8 +1697,14 @@ textarea[data-capitalize="words"] {
   .monitoring-heading,
   .monitoring-identity-grid,
   .income-grid,
+  .beneficiary-monitoring-kpis,
   .signature-grid {
     grid-template-columns: 1fr;
+  }
+
+  .beneficiary-monitoring-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .monitoring-identity-grid .wide {

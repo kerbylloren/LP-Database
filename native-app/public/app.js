@@ -1006,6 +1006,12 @@ async function loadMonitoringReport(id) {
   return payload.report;
 }
 
+async function loadBeneficiaryMonitoringReports(recordId) {
+  if (!recordId) return [];
+  const payload = await api(`/api/monitoring/reports?beneficiaryId=${encodeURIComponent(recordId)}&limit=500`);
+  return payload.reports || [];
+}
+
 function monitoringOverview(reports) {
   const totals = reports.reduce((summary, report) => {
     summary.sales += Number(report.total_sales || 0);
@@ -1024,6 +1030,95 @@ function monitoringOverview(reports) {
     months: totals.months.size,
     monthCounts
   };
+}
+
+function beneficiaryMonitoringSummary(reports = []) {
+  const sortedReports = [...reports].sort((left, right) => String(left.report_month || "").localeCompare(String(right.report_month || "")));
+  const totals = sortedReports.reduce((summary, report) => {
+    summary.sales += Number(report.total_sales || 0);
+    summary.expenses += Number(report.total_expenses || 0);
+    summary.net += Number(report.net_income || 0);
+    summary.balance += Number(report.forwarded_balance || 0);
+    return summary;
+  }, { sales: 0, expenses: 0, net: 0, balance: 0 });
+  const latest = sortedReports[sortedReports.length - 1] || null;
+  const profitableMonths = sortedReports.filter(report => Number(report.net_income || 0) > 0).length;
+
+  return {
+    reports: sortedReports,
+    count: sortedReports.length,
+    months: sortedReports.map(report => report.report_month).filter(Boolean),
+    latest,
+    sales: totals.sales,
+    expenses: totals.expenses,
+    net: totals.net,
+    balance: totals.balance,
+    averageNet: sortedReports.length ? totals.net / sortedReports.length : 0,
+    profitableMonths
+  };
+}
+
+function renderBeneficiaryMonitoringSummary(reports = [], mode = "profile") {
+  const summary = beneficiaryMonitoringSummary(reports);
+  const latestLabel = summary.latest ? reportMonthLabel(summary.latest.report_month) : "No Reports Yet";
+  const sectionClass = mode === "print" ? "print-monitoring-summary" : "beneficiary-monitoring-summary";
+
+  return `
+    <section class="${sectionClass}">
+      <div class="beneficiary-monitoring-head">
+        <div>
+          <span class="analytics-eyebrow">Monitoring Summary</span>
+          <h3>Monthly Progress, Financials & Inventory</h3>
+        </div>
+        <span>${escapeHtml(latestLabel)}</span>
+      </div>
+      ${summary.count ? `
+        <div class="beneficiary-monitoring-kpis">
+          ${renderMonitoringSummaryMetric("Reports", String(summary.count), `${summary.months.length} month${summary.months.length === 1 ? "" : "s"} filed`)}
+          ${renderMonitoringSummaryMetric("Total Sales", formatMoney(summary.sales), "All submitted reports")}
+          ${renderMonitoringSummaryMetric("Total Expenses", formatMoney(summary.expenses), "All submitted reports")}
+          ${renderMonitoringSummaryMetric("Net Income", formatMoney(summary.net), `${summary.profitableMonths} positive month${summary.profitableMonths === 1 ? "" : "s"}`)}
+          ${renderMonitoringSummaryMetric("Avg. Monthly Net", formatMoney(summary.averageNet), "Across submitted reports")}
+        </div>
+        <div class="beneficiary-monitoring-table-wrap">
+          <table class="beneficiary-monitoring-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Project</th>
+                <th>Sales</th>
+                <th>Expenses</th>
+                <th>Net Income</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${summary.reports.slice(-6).reverse().map(report => `
+                <tr>
+                  <td>${escapeHtml(reportMonthLabel(report.report_month))}</td>
+                  <td>${escapeHtml(report.project_type || "")}</td>
+                  <td>${escapeHtml(formatMoney(report.total_sales))}</td>
+                  <td>${escapeHtml(formatMoney(report.total_expenses))}</td>
+                  <td>${escapeHtml(formatMoney(report.net_income))}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div class="beneficiary-monitoring-empty">No monitoring reports have been filed for this beneficiary yet.</div>
+      `}
+    </section>
+  `;
+}
+
+function renderMonitoringSummaryMetric(label, value, caption) {
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <em>${escapeHtml(caption)}</em>
+    </article>
+  `;
 }
 
 function renderMonitoringOverview(reports) {
@@ -1791,18 +1886,20 @@ function printMonitoringReport(report) {
 async function renderEditorPage(id = "") {
   setTitle(id ? "Editor" : "New Application");
 
-  const record = id ? await loadRecord(id) : await makeNewRecord();
+  const [record, monitoringReports] = id
+    ? await Promise.all([loadRecord(id), loadBeneficiaryMonitoringReports(id)])
+    : [await makeNewRecord(), []];
   state.currentRecord = record;
   state.pictureData = record.picture_data || "";
 
   setTopbarActions([
     { id: "editorNew", label: "New", icon: "plus", onClick: () => navigate("editor") },
     { id: "editorSave", label: "Save", icon: "save", variant: "primary", onClick: () => saveCurrentRecord().catch(error => showToast(error.message)) },
-    { id: "editorPrint", label: "Print", icon: "print", onClick: () => printRecord(collectRecord()) },
+    { id: "editorPrint", label: "Print", icon: "print", onClick: () => printRecord(collectRecord(), monitoringReports) },
     ...(record.id ? [{ id: "editorDelete", label: "Delete", icon: "bin", variant: "danger", onClick: () => deleteCurrentRecord(record.id).catch(error => showToast(error.message)) }] : [])
   ]);
 
-  elements.pageRoot.innerHTML = renderApplicationForm(record, "edit");
+  elements.pageRoot.innerHTML = renderApplicationForm(record, "edit", monitoringReports);
   attachEditorFormHandlers();
 }
 
@@ -1832,17 +1929,20 @@ async function renderViewerPage(id = "") {
     return;
   }
 
-  const record = await loadRecord(id);
+  const [record, monitoringReports] = await Promise.all([
+    loadRecord(id),
+    loadBeneficiaryMonitoringReports(id)
+  ]);
   state.currentRecord = record;
   setTopbarActions([
     { id: "viewerEdit", label: "Edit", icon: "edit", variant: "primary", onClick: () => navigate("editor", record.id) },
-    { id: "viewerPrint", label: "Print", icon: "print", onClick: () => printRecord(record) },
+    { id: "viewerPrint", label: "Print", icon: "print", onClick: () => printRecord(record, monitoringReports) },
     { id: "viewerDelete", label: "Delete", icon: "bin", variant: "danger", onClick: () => deleteCurrentRecord(record.id).catch(error => showToast(error.message)) }
   ]);
-  elements.pageRoot.innerHTML = renderApplicationForm(record, "view");
+  elements.pageRoot.innerHTML = renderApplicationForm(record, "view", monitoringReports);
 }
 
-function renderApplicationForm(record, mode) {
+function renderApplicationForm(record, mode, monitoringReports = []) {
   const readonly = mode !== "edit";
   return `
     <section class="application-paper ${readonly ? "readonly" : "editable"}">
@@ -1874,6 +1974,7 @@ function renderApplicationForm(record, mode) {
       ${formSection("IV. Livelihood Project Interest", ["livelihood_interest", "field_c38", "field_f39"], record, readonly)}
       ${formSection("V. Skills and Experience", ["seminar", "field_k43"], record, readonly)}
       ${formSection("VI. Availability and Commitment", ["willingness", "commit_days"], record, readonly)}
+      ${record.id ? renderBeneficiaryMonitoringSummary(monitoringReports) : ""}
 
       <section class="form-certification">
         <p>Pinapatunayan ko na ang lahat ng detalye sa itaas ay totoo at wasto.</p>
@@ -2437,7 +2538,7 @@ function printableSections(record, familySectionHtml) {
   }).join("");
 }
 
-function printRecord(record) {
+function printRecord(record, monitoringReports = []) {
   const printWindow = window.open("", "_blank", "width=940,height=760");
   if (!printWindow) {
     showToast("Allow popups to print records.");
@@ -2460,6 +2561,7 @@ function printRecord(record) {
     ? `<img class="picture" src="${escapeHtml(record.picture_data)}" alt="">`
     : `<div class="picture picture-placeholder">Photo</div>`;
   const logoSrc = `${window.location.origin}/assets/paofi-logo.png`;
+  const monitoringSummaryHtml = renderBeneficiaryMonitoringSummary(monitoringReports, "print");
 
   printWindow.document.write(`
     <!doctype html>
@@ -2653,6 +2755,85 @@ function printRecord(record) {
           .family td:nth-child(7) { width: 14%; }
           .family th:nth-child(8),
           .family td:nth-child(8) { width: 10%; }
+          .print-monitoring-summary {
+            grid-column: 1 / -1;
+            break-inside: avoid;
+          }
+          .beneficiary-monitoring-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: flex-end;
+            margin-bottom: 4px;
+          }
+          .beneficiary-monitoring-head h3 {
+            margin: 0;
+            color: #143d33;
+            font-size: 9.2px;
+          }
+          .beneficiary-monitoring-head span {
+            color: #5b6861;
+            font-size: 7px;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+          .beneficiary-monitoring-kpis {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 4px;
+            margin-bottom: 5px;
+          }
+          .beneficiary-monitoring-kpis article {
+            min-height: 36px;
+            border: 1px solid #cddbd2;
+            border-left: 3px solid #1f7a4f;
+            padding: 3px 4px;
+            background: #fbfdfc;
+          }
+          .beneficiary-monitoring-kpis span,
+          .beneficiary-monitoring-kpis em {
+            display: block;
+            color: #5b6861;
+            font-size: 6.4px;
+            font-style: normal;
+          }
+          .beneficiary-monitoring-kpis strong {
+            display: block;
+            color: #143d33;
+            font-size: 8px;
+            line-height: 1.1;
+          }
+          .beneficiary-monitoring-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+          }
+          .beneficiary-monitoring-table th,
+          .beneficiary-monitoring-table td {
+            border: 1px solid #cddbd2;
+            padding: 3px 4px;
+            font-size: 6.8px;
+            overflow-wrap: anywhere;
+          }
+          .beneficiary-monitoring-table th {
+            background: #f2f7f4;
+            color: #243029;
+            font-weight: 800;
+          }
+          .beneficiary-monitoring-empty {
+            border: 1px dashed #cddbd2;
+            padding: 8px;
+            color: #5b6861;
+            text-align: center;
+          }
+          .analytics-eyebrow {
+            display: block;
+            color: #155b3c;
+            font-size: 6.5px;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+          }
           @media print {
             body { background: #ffffff; }
             button { display: none; }
@@ -2682,6 +2863,7 @@ function printRecord(record) {
         </header>
         <div class="print-body">
           ${printableSections(record, familySectionHtml)}
+          ${monitoringSummaryHtml}
         </div>
         </main>
       </body>
