@@ -1,6 +1,6 @@
 {
   "name": "paofi-database-native",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "Desktop database app for PAOFI program records.",
   "author": {
