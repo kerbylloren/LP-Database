@@ -215,6 +215,24 @@ test("backfills current group from livelihood interest", () => {
   db.close();
 });
 
+test("sorts livelihood family composition rows by age", () => {
+  const db = new BeneficiaryDatabase(tempDbPath());
+  const beneficiary = db.saveRecord({
+    control_no: "LP-2026-030",
+    last_name: "Sorted",
+    first_name: "Family",
+    list_a18: "Young Member\nOlder Parent\nTeen Member",
+    list_c18: "7\n44\n16",
+    list_d18: "Male\nFemale\nFemale"
+  });
+
+  assert.equal(beneficiary.list_a18, "Older Parent\nTeen Member\nYoung Member");
+  assert.equal(beneficiary.list_c18, "44\n16\n7");
+  assert.equal(beneficiary.list_d18, "Female\nFemale\nMale");
+
+  db.close();
+});
+
 test("creates, updates, lists, exports, and deletes nutrition core records", () => {
   const db = new BeneficiaryDatabase(tempDbPath());
 
@@ -281,7 +299,8 @@ test("creates, updates, lists, exports, and deletes nutrition core records", () 
   assert.equal(created.current_update_date, "08/04/2026");
   assert.equal(created.current_nutrition_status, "Normal");
   assert.equal(created.household_members.length, 2);
-  assert.equal(created.household_members[0].relationship, "Father");
+  assert.equal(created.household_members[0].relationship, "Mother");
+  assert.equal(created.household_members[0].occupation, "Service Crew");
   assert.equal(db.stats().nutritionBeneficiaries, 1);
   assert.equal(db.nextNutritionBeneficiaryNo(2026), "NP-2026-002");
   assert.equal(db.listNutritionBeneficiaries({ search: "abot" }).length, 1);
@@ -321,6 +340,60 @@ test("creates, updates, lists, exports, and deletes nutrition core records", () 
   assert.equal(db.stats().nutritionBeneficiaries, 0);
   db.deleteNutritionCenter(center.id);
   assert.equal(db.stats().nutritionCenters, 0);
+
+  db.close();
+});
+
+test("duplicates nutrition household members across sibling beneficiaries", () => {
+  const db = new BeneficiaryDatabase(tempDbPath());
+  const center = db.saveNutritionCenter({
+    center_name: "molave feeding center"
+  });
+
+  const firstChild = db.saveNutritionBeneficiary({
+    beneficiary_no: "NP-2026-020",
+    center_id: center.id,
+    child_last_name: "Abot",
+    child_first_name: "Joan",
+    birth_date: "2016-09-16",
+    mother_name: "Kristine Salde",
+    mother_occupation: "Service Crew",
+    father_name: "Jonathan Abot",
+    father_occupation: "Garbage Collector",
+    contact_no: "09707054085",
+    household_members: [
+      { member_name: "Kristine Salde", age: "34", relationship: "Mother", occupation: "House Keeper" },
+      { member_name: "Jonathan Abot", age: "30", relationship: "Father", occupation: "Garbage Collector" },
+      { member_name: "Kenneth Abot", age: "2", relationship: "Brother", occupation: "N/A" }
+    ]
+  });
+
+  const secondChild = db.saveNutritionBeneficiary({
+    beneficiary_no: "NP-2026-021",
+    center_id: center.id,
+    child_last_name: "Abot",
+    child_first_name: "John Christopher",
+    birth_date: "2011-03-01",
+    mother_name: "Kristine Salde",
+    mother_occupation: "Service Crew",
+    father_name: "Jonathan Abot",
+    father_occupation: "Garbage Collector",
+    contact_no: "09707054085",
+    household_members: [
+      { member_name: "Maria Abot", age: "12", relationship: "Sister", occupation: "Student" }
+    ]
+  });
+
+  const refreshedFirst = db.getNutritionBeneficiary(firstChild.id);
+  assert.deepEqual(
+    refreshedFirst.household_members.map(member => member.member_name),
+    secondChild.household_members.map(member => member.member_name)
+  );
+  assert.deepEqual(
+    refreshedFirst.household_members.map(member => member.age),
+    ["34", "30", "12", "2"]
+  );
+  assert.equal(refreshedFirst.household_members[0].occupation, "Service Crew");
 
   db.close();
 });

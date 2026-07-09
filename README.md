@@ -4,15 +4,17 @@ A standalone Windows desktop database application for Payatas Orione Foundation
 Inc. programs. The app is built with Electron and opens in its own application
 window, not as an Edge or Chrome app-mode window.
 
-The current production module focuses on the Livelihood Program. Future major
-release lines will expand the same system to other PAOFI programs.
+The current production modules cover the Livelihood Program and the Nutrition
+Program / Supplemental Feeding core records and growth monitoring workflows.
+Future major release lines will expand the same system to Scholarship and
+Health Program operations.
 
 Download the Windows installer from the
 [latest GitHub Release](https://github.com/kerbylloren/PAOFI-Database/releases/latest).
 
 ## Current Release
 
-Latest version: `1.0.0`
+Latest version: `1.2.0`
 
 The release includes:
 
@@ -46,6 +48,14 @@ The application will use major version lines to track PAOFI program modules:
 - Expanded database filters for beneficiary fields, search, and age range
 - Summary analytics on the main dashboard and detailed analytics in database views
 - Beneficiary-level monitoring summary in profiles and print output
+- Nutrition beneficiary profile records
+- Feeding center profile records and center-level views
+- Nutrition OCR import support for beneficiary profiles from images and PDFs
+- Monthly growth monitoring by feeding center
+- Child age-in-months, height change, weight change, and growth classification
+- Nutrition profile snapshots derived from the latest growth monitoring report
+- Printable nutrition beneficiary profiles
+- Printable monthly and yearly growth monitoring summaries
 - JSON export for backup
 
 ## Cloud Database

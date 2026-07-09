@@ -22,6 +22,16 @@ const RAW_VALUE_FIELDS = new Set([
   "list_c18",
   "list_m18"
 ]);
+const FAMILY_FIELDS = [
+  "list_a18",
+  "list_c18",
+  "list_d18",
+  "list_f18",
+  "list_h18",
+  "list_j18",
+  "list_k18",
+  "list_m18"
+];
 const UPPERCASE_TERMS = new Set([
   "ALS",
   "BPI",
@@ -253,6 +263,7 @@ function normalizeRecord(input = {}) {
   if (!output.date_updated) output.date_updated = todayDate();
   if (!output.status) output.status = "Active";
   output.control_no = output.control_no.trim();
+  sortRecordFamilyFields(output);
 
   return output;
 }
@@ -292,6 +303,78 @@ function normalizeProfileDate(value) {
 
   if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900) return text;
   return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${year}`;
+}
+
+function parseProfileDate(value) {
+  const normalized = normalizeProfileDate(value);
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(normalized);
+  if (!match) return null;
+
+  const date = new Date(Number(match[3]), Number(match[1]) - 1, Number(match[2]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function calculateAgeYearsText(value, referenceDate = new Date()) {
+  const birthDate = parseProfileDate(value);
+  if (!birthDate) return "";
+
+  let age = referenceDate.getFullYear() - birthDate.getFullYear();
+  const beforeBirthday = referenceDate.getMonth() < birthDate.getMonth()
+    || (referenceDate.getMonth() === birthDate.getMonth() && referenceDate.getDate() < birthDate.getDate());
+  if (beforeBirthday) age -= 1;
+  return age >= 0 && age < 130 ? String(age) : "";
+}
+
+function splitRecordLines(value) {
+  return normalizeText(value)
+    .split("\n")
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function ageSortNumber(value) {
+  const text = normalizePositiveIntegerText(value);
+  if (!text) return null;
+
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function compareRowsByAgeDesc(left, right, ageField = "age") {
+  const leftAge = ageSortNumber(left?.[ageField]);
+  const rightAge = ageSortNumber(right?.[ageField]);
+
+  if (leftAge !== null && rightAge !== null && leftAge !== rightAge) return rightAge - leftAge;
+  if (leftAge !== null && rightAge === null) return -1;
+  if (leftAge === null && rightAge !== null) return 1;
+
+  const leftName = normalizeText(left?.member_name || left?.list_a18).toLowerCase();
+  const rightName = normalizeText(right?.member_name || right?.list_a18).toLowerCase();
+  return leftName.localeCompare(rightName);
+}
+
+function sortRecordFamilyFields(record) {
+  const columns = FAMILY_FIELDS.reduce((items, fieldName) => {
+    items[fieldName] = splitRecordLines(record[fieldName]);
+    return items;
+  }, {});
+  const rowCount = Math.max(0, ...FAMILY_FIELDS.map(fieldName => columns[fieldName].length));
+  if (!rowCount) return record;
+
+  const rows = Array.from({ length: rowCount }, (_, index) => {
+    return FAMILY_FIELDS.reduce((row, fieldName) => {
+      row[fieldName] = columns[fieldName][index] || "";
+      return row;
+    }, {});
+  })
+    .filter(row => rowHasValue(row, FAMILY_FIELDS))
+    .sort((left, right) => compareRowsByAgeDesc(left, right, "list_c18"));
+
+  FAMILY_FIELDS.forEach(fieldName => {
+    record[fieldName] = rows.map(row => row[fieldName] || "-").join("\n");
+  });
+
+  return record;
 }
 
 function normalizeMonitoringText(value) {
@@ -408,20 +491,83 @@ function normalizeNutritionCenter(input = {}) {
 }
 
 function normalizeNutritionHouseholdMembers(rows = []) {
-  return (Array.isArray(rows) ? rows : [])
+  return mergeNutritionHouseholdMembers(Array.isArray(rows) ? rows : []);
+}
+
+function nutritionHouseholdMemberKey(row = {}) {
+  const relationship = titleCaseValue(row.relationship).toLowerCase();
+  const name = titleCaseValue(row.member_name || row.memberName).toLowerCase();
+
+  if (relationship === "father" || relationship === "mother") return `parent:${relationship}`;
+  if (name) return `name:${name}`;
+  return relationship ? `relationship:${relationship}:${titleCaseValue(row.occupation).toLowerCase()}` : "";
+}
+
+function mergeNutritionHouseholdMembers(...rowGroups) {
+  const merged = new Map();
+
+  rowGroups.flat()
+    .filter(Boolean)
     .map(row => ({
       member_name: titleCaseValue(row.member_name || row.memberName),
       age: normalizePositiveIntegerText(row.age),
       relationship: titleCaseValue(row.relationship),
       occupation: titleCaseValue(row.occupation)
     }))
-    .filter(row => rowHasValue(row, NUTRITION_HOUSEHOLD_FIELDS));
+    .filter(row => rowHasValue(row, NUTRITION_HOUSEHOLD_FIELDS))
+    .forEach(row => {
+      const key = nutritionHouseholdMemberKey(row);
+      if (!key) return;
+
+      const existing = merged.get(key);
+      merged.set(key, existing
+        ? {
+            member_name: existing.member_name || row.member_name,
+            age: existing.age || row.age,
+            relationship: existing.relationship || row.relationship,
+            occupation: existing.occupation || row.occupation
+          }
+        : row);
+    });
+
+  return [...merged.values()].sort(compareRowsByAgeDesc);
+}
+
+function ensureNutritionParentHouseholdMembers(beneficiary, rows = []) {
+  const prepared = normalizeNutritionHouseholdMembers(rows);
+
+  const upsertParent = (relationship, name, occupation) => {
+    const parentName = titleCaseValue(name);
+    const parentOccupation = titleCaseValue(occupation);
+    if (!parentName && !parentOccupation) return;
+
+    const index = prepared.findIndex(row => {
+      return titleCaseValue(row.relationship).toLowerCase() === relationship.toLowerCase()
+        || (parentName && titleCaseValue(row.member_name).toLowerCase() === parentName.toLowerCase());
+    });
+
+    const parentRow = {
+      member_name: parentName,
+      age: index >= 0 ? prepared[index].age : "",
+      relationship,
+      occupation: parentOccupation || (index >= 0 ? prepared[index].occupation : "")
+    };
+
+    if (index >= 0) prepared[index] = parentRow;
+    else prepared.push(parentRow);
+  };
+
+  upsertParent("Mother", beneficiary.mother_name, beneficiary.mother_occupation);
+  upsertParent("Father", beneficiary.father_name, beneficiary.father_occupation);
+
+  return mergeNutritionHouseholdMembers(prepared);
 }
 
 function normalizeNutritionBeneficiary(input = {}, center = null) {
   const centerId = Number(input.center_id || input.centerId || center?.id || 0) || null;
+  const birthDate = normalizeProfileDate(input.birth_date || input.birthDate);
 
-  return {
+  const beneficiary = {
     id: Number(input.id || 0) || 0,
     center_id: centerId,
     beneficiary_no: normalizeText(input.beneficiary_no || input.beneficiaryNo).trim(),
@@ -430,8 +576,8 @@ function normalizeNutritionBeneficiary(input = {}, center = null) {
     child_last_name: titleCaseValue(input.child_last_name || input.childLastName),
     child_first_name: titleCaseValue(input.child_first_name || input.childFirstName),
     child_middle_name: titleCaseValue(input.child_middle_name || input.childMiddleName),
-    birth_date: normalizeProfileDate(input.birth_date || input.birthDate),
-    age: normalizePositiveIntegerText(input.age),
+    birth_date: birthDate,
+    age: calculateAgeYearsText(birthDate),
     gender: titleCaseValue(input.gender),
     home_address: titleCaseValue(input.home_address || input.homeAddress),
     school: titleCaseValue(input.school),
@@ -457,6 +603,9 @@ function normalizeNutritionBeneficiary(input = {}, center = null) {
     current_nutrition_status: titleCaseValue(input.current_nutrition_status || input.currentNutritionStatus),
     household_members: normalizeNutritionHouseholdMembers(input.household_members || input.householdMembers)
   };
+
+  beneficiary.household_members = ensureNutritionParentHouseholdMembers(beneficiary, beneficiary.household_members);
+  return beneficiary;
 }
 
 function formatMeasurementValue(value) {
@@ -1625,6 +1774,65 @@ class BeneficiaryDatabase {
     return row || null;
   }
 
+  nutritionSiblingConditions(beneficiary, beneficiaryId) {
+    const conditions = ["id <> ?"];
+    const args = [Number(beneficiaryId || 0)];
+    const mother = normalizeText(beneficiary.mother_name).trim().toLowerCase();
+    const father = normalizeText(beneficiary.father_name).trim().toLowerCase();
+    const contact = normalizeContactNumber(beneficiary.contact_no);
+
+    if (mother && father) {
+      conditions.push("lower(mother_name) = ? AND lower(father_name) = ?");
+      args.push(mother, father);
+    } else if (mother && contact) {
+      conditions.push("lower(mother_name) = ? AND contact_no = ?");
+      args.push(mother, contact);
+    } else if (father && contact) {
+      conditions.push("lower(father_name) = ? AND contact_no = ?");
+      args.push(father, contact);
+    } else {
+      return null;
+    }
+
+    return { where: conditions.join(" AND "), args };
+  }
+
+  findNutritionSiblingIds(beneficiary, beneficiaryId) {
+    const filter = this.nutritionSiblingConditions(beneficiary, beneficiaryId);
+    if (!filter) return [];
+
+    return this.db
+      .prepare(`SELECT id FROM nutrition_beneficiaries WHERE ${filter.where}`)
+      .all(...filter.args)
+      .map(row => Number(row.id))
+      .filter(Boolean);
+  }
+
+  nutritionHouseholdMembersFor(beneficiaryId) {
+    return this.db
+      .prepare(`
+        SELECT member_name, age, relationship, occupation
+        FROM nutrition_household_members
+        WHERE beneficiary_id = ?
+        ORDER BY row_order, id
+      `)
+      .all(Number(beneficiaryId));
+  }
+
+  writeNutritionHouseholdMembers(beneficiaryId, members, memberInsert) {
+    this.db.prepare("DELETE FROM nutrition_household_members WHERE beneficiary_id = ?").run(Number(beneficiaryId));
+    members.forEach((member, index) => {
+      memberInsert.run(
+        Number(beneficiaryId),
+        index,
+        member.member_name,
+        member.age,
+        member.relationship,
+        member.occupation
+      );
+    });
+  }
+
   saveNutritionBeneficiary(input = {}) {
     const id = Number(input.id || 0);
     const existing = id ? this.getNutritionBeneficiary(id) : null;
@@ -1674,22 +1882,18 @@ class BeneficiaryDatabase {
         beneficiaryId = Number(result.lastInsertRowid);
       }
 
-      this.db.prepare("DELETE FROM nutrition_household_members WHERE beneficiary_id = ?").run(beneficiaryId);
       const memberInsert = this.db.prepare(`
         INSERT INTO nutrition_household_members (
           beneficiary_id, row_order, member_name, age, relationship, occupation
         )
         VALUES (?, ?, ?, ?, ?, ?)
       `);
-      beneficiary.household_members.forEach((member, index) => {
-        memberInsert.run(
-          beneficiaryId,
-          index,
-          member.member_name,
-          member.age,
-          member.relationship,
-          member.occupation
-        );
+      const siblingIds = this.findNutritionSiblingIds(beneficiary, beneficiaryId);
+      const siblingHouseholdRows = siblingIds.flatMap(siblingId => this.nutritionHouseholdMembersFor(siblingId));
+      const householdMembers = mergeNutritionHouseholdMembers(beneficiary.household_members, siblingHouseholdRows);
+
+      [beneficiaryId, ...siblingIds].forEach(targetId => {
+        this.writeNutritionHouseholdMembers(targetId, householdMembers, memberInsert);
       });
 
       this.db.exec("COMMIT");
@@ -2107,6 +2311,7 @@ module.exports = {
   normalizeContactNumber,
   normalizeAmount,
   normalizeFieldValue,
+  mergeNutritionHouseholdMembers,
   normalizeMonitoringReport,
   normalizeNutritionBeneficiary,
   normalizeNutritionCenter,

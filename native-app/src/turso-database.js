@@ -3,7 +3,9 @@ const { cloudLocationLabel } = require("./cloud-config");
 const {
   NUTRITION_BENEFICIARY_FIELDS,
   NUTRITION_GROWTH_ENTRY_FIELDS,
+  mergeNutritionHouseholdMembers,
   normalizeAmount,
+  normalizeContactNumber,
   normalizeMonitoringReport,
   normalizeNutritionBeneficiary,
   normalizeNutritionCenter,
@@ -1268,6 +1270,74 @@ class TursoBeneficiaryDatabase {
     return plainRow(result.rows[0]) || null;
   }
 
+  nutritionSiblingConditions(beneficiary, beneficiaryId) {
+    const conditions = ["id <> ?"];
+    const args = [Number(beneficiaryId || 0)];
+    const mother = String(beneficiary.mother_name || "").trim().toLowerCase();
+    const father = String(beneficiary.father_name || "").trim().toLowerCase();
+    const contact = normalizeContactNumber(beneficiary.contact_no);
+
+    if (mother && father) {
+      conditions.push("lower(mother_name) = ? AND lower(father_name) = ?");
+      args.push(mother, father);
+    } else if (mother && contact) {
+      conditions.push("lower(mother_name) = ? AND contact_no = ?");
+      args.push(mother, contact);
+    } else if (father && contact) {
+      conditions.push("lower(father_name) = ? AND contact_no = ?");
+      args.push(father, contact);
+    } else {
+      return null;
+    }
+
+    return { where: conditions.join(" AND "), args };
+  }
+
+  async findNutritionSiblingIds(beneficiary, beneficiaryId) {
+    const filter = this.nutritionSiblingConditions(beneficiary, beneficiaryId);
+    if (!filter) return [];
+
+    const result = await this.execute(
+      `SELECT id FROM nutrition_beneficiaries WHERE ${filter.where}`,
+      filter.args
+    );
+    return rows(result).map(row => Number(row.id)).filter(Boolean);
+  }
+
+  async nutritionHouseholdMembersFor(beneficiaryId) {
+    return rows(await this.execute(
+      `
+        SELECT member_name, age, relationship, occupation
+        FROM nutrition_household_members
+        WHERE beneficiary_id = ?
+        ORDER BY row_order, id
+      `,
+      [Number(beneficiaryId)]
+    ));
+  }
+
+  nutritionHouseholdWriteStatements(beneficiaryId, members) {
+    return [
+      { sql: "DELETE FROM nutrition_household_members WHERE beneficiary_id = ?", args: [Number(beneficiaryId)] },
+      ...members.map((member, index) => ({
+        sql: `
+          INSERT INTO nutrition_household_members (
+            beneficiary_id, row_order, member_name, age, relationship, occupation
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        args: [
+          Number(beneficiaryId),
+          index,
+          member.member_name,
+          member.age,
+          member.relationship,
+          member.occupation
+        ]
+      }))
+    ];
+  }
+
   async saveNutritionBeneficiary(input = {}) {
     const id = Number(input.id || 0);
     const existing = id ? await this.getNutritionBeneficiary(id) : null;
@@ -1316,25 +1386,17 @@ class TursoBeneficiaryDatabase {
       beneficiaryId = result.lastInsertRowid ? Number(result.lastInsertRowid) : 0;
     }
 
-    await this.client.batch([
-      { sql: "DELETE FROM nutrition_household_members WHERE beneficiary_id = ?", args: [beneficiaryId] },
-      ...beneficiary.household_members.map((member, index) => ({
-        sql: `
-          INSERT INTO nutrition_household_members (
-            beneficiary_id, row_order, member_name, age, relationship, occupation
-          )
-          VALUES (?, ?, ?, ?, ?, ?)
-        `,
-        args: [
-          beneficiaryId,
-          index,
-          member.member_name,
-          member.age,
-          member.relationship,
-          member.occupation
-        ]
-      }))
-    ], "write");
+    const siblingIds = await this.findNutritionSiblingIds(beneficiary, beneficiaryId);
+    const siblingHouseholdRows = [];
+    for (const siblingId of siblingIds) {
+      siblingHouseholdRows.push(...await this.nutritionHouseholdMembersFor(siblingId));
+    }
+    const householdMembers = mergeNutritionHouseholdMembers(beneficiary.household_members, siblingHouseholdRows);
+
+    await this.client.batch(
+      [beneficiaryId, ...siblingIds].flatMap(targetId => this.nutritionHouseholdWriteStatements(targetId, householdMembers)),
+      "write"
+    );
 
     await this.refreshNutritionBeneficiaryGrowthSnapshot(beneficiaryId);
     return this.getNutritionBeneficiary(beneficiaryId);

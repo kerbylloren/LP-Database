@@ -163,7 +163,7 @@ const NUTRITION_BASIC_GROUPS = [
     title: "Birth & Gender",
     fields: [
       { name: "birth_date", label: "Birth Date", input: "date" },
-      { name: "age", label: "Age", input: "number" },
+      { name: "age", label: "Age", input: "computed-age" },
       { name: "gender", label: "Gender", input: "select", options: NUTRITION_GENDER_OPTIONS }
     ]
   },
@@ -1416,8 +1416,8 @@ async function renderMenuPage() {
     <section class="menu-hero">
       <div class="menu-hero-copy">
         <p class="eyebrow">Payatas Orione Foundation Inc.</p>
-        <h2>Payatas Orione Foundation Inc.</h2>
-        <strong>Programs Database</strong>
+        <h2>Programs Database</h2>
+        <strong>Integrated Program Records</strong>
         <span>"A simple effort can make a great impact"</span>
       </div>
       <div class="form-miniature" aria-hidden="true">
@@ -2197,10 +2197,21 @@ function nutritionSelectOptions(options, selected = "", includeBlank = true) {
 function renderNutritionField(meta, record, centers, readonly) {
   const value = meta.input === "date"
     ? normalizeNutritionDateValue(record[meta.name])
+    : meta.input === "computed-age"
+      ? nutritionAgeText(record.birth_date)
     : meta.input === "computed"
       ? nutritionComputedValue(record, meta.name)
     : nutritionText(record[meta.name]);
   const isWide = meta.wide || meta.input === "textarea";
+
+  if (meta.input === "computed-age") {
+    return `
+      <div class="paper-field ${isWide ? "wide" : ""}">
+        <label>${escapeHtml(meta.label)}</label>
+        <div class="display-value computed-value" data-nutrition-computed-age="${escapeHtml(meta.name)}">${escapeHtml(value) || "&nbsp;"}</div>
+      </div>
+    `;
+  }
 
   if (meta.input === "computed") {
     return `
@@ -2311,8 +2322,107 @@ function shouldNutritionCapitalizeField(name) {
   ].includes(name);
 }
 
+function ageSortNumber(value) {
+  const text = String(value || "").replace(/\D/g, "");
+  if (!text) return null;
+
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function compareRowsByAgeDesc(left, right, ageField = "age") {
+  const leftAge = ageSortNumber(left?.[ageField]);
+  const rightAge = ageSortNumber(right?.[ageField]);
+
+  if (leftAge !== null && rightAge !== null && leftAge !== rightAge) return rightAge - leftAge;
+  if (leftAge !== null && rightAge === null) return -1;
+  if (leftAge === null && rightAge !== null) return 1;
+
+  const leftName = String(left?.member_name || left?.list_a18 || "").toLowerCase();
+  const rightName = String(right?.member_name || right?.list_a18 || "").toLowerCase();
+  return leftName.localeCompare(rightName);
+}
+
+function normalizeNutritionHouseholdRow(row = {}) {
+  return {
+    member_name: titleCaseValue(row.member_name),
+    age: normalizeNutritionInputValue("age", row.age || ""),
+    relationship: titleCaseValue(row.relationship),
+    occupation: titleCaseValue(row.occupation)
+  };
+}
+
+function nutritionHouseholdRowHasValue(row = {}) {
+  return NUTRITION_HOUSEHOLD_FIELDS.some(fieldMeta => String(row[fieldMeta.name] || "").trim());
+}
+
+function nutritionHouseholdKey(row = {}) {
+  const relationship = titleCaseValue(row.relationship).toLowerCase();
+  const name = titleCaseValue(row.member_name).toLowerCase();
+
+  if (relationship === "father" || relationship === "mother") return `parent:${relationship}`;
+  if (name) return `name:${name}`;
+  return relationship ? `relationship:${relationship}:${titleCaseValue(row.occupation).toLowerCase()}` : "";
+}
+
+function mergeNutritionHouseholdRows(...rowGroups) {
+  const merged = new Map();
+
+  rowGroups.flat().forEach(rawRow => {
+    const row = normalizeNutritionHouseholdRow(rawRow);
+    if (!nutritionHouseholdRowHasValue(row)) return;
+
+    const key = nutritionHouseholdKey(row);
+    if (!key) return;
+
+    const existing = merged.get(key);
+    merged.set(key, existing
+      ? {
+          member_name: existing.member_name || row.member_name,
+          age: existing.age || row.age,
+          relationship: existing.relationship || row.relationship,
+          occupation: existing.occupation || row.occupation
+        }
+      : row);
+  });
+
+  return [...merged.values()].sort(compareRowsByAgeDesc);
+}
+
+function ensureNutritionParentHouseholdRows(record = {}, rows = []) {
+  const prepared = (Array.isArray(rows) ? rows : [])
+    .map(normalizeNutritionHouseholdRow)
+    .filter(nutritionHouseholdRowHasValue);
+
+  const upsertParent = (relationship, name, occupation) => {
+    const parentName = titleCaseValue(name);
+    const parentOccupation = titleCaseValue(occupation);
+    if (!parentName && !parentOccupation) return;
+
+    const index = prepared.findIndex(row => {
+      return titleCaseValue(row.relationship).toLowerCase() === relationship.toLowerCase()
+        || (parentName && titleCaseValue(row.member_name).toLowerCase() === parentName.toLowerCase());
+    });
+
+    const parentRow = {
+      member_name: parentName,
+      age: index >= 0 ? prepared[index].age : "",
+      relationship,
+      occupation: parentOccupation || (index >= 0 ? prepared[index].occupation : "")
+    };
+
+    if (index >= 0) prepared[index] = parentRow;
+    else prepared.push(parentRow);
+  };
+
+  upsertParent("Mother", record.mother_name, record.mother_occupation);
+  upsertParent("Father", record.father_name, record.father_occupation);
+
+  return mergeNutritionHouseholdRows(prepared);
+}
+
 function nutritionHouseholdRows(record = {}) {
-  return Array.isArray(record.household_members) ? record.household_members : [];
+  return ensureNutritionParentHouseholdRows(record, record.household_members || []);
 }
 
 function renderNutritionHouseholdCell(fieldMeta, row, rowIndex, readonly) {
@@ -2502,6 +2612,47 @@ function attachNutritionHouseholdRemoveHandlers(scope = document) {
   });
 }
 
+function readNutritionHouseholdRowsFromDom() {
+  return [...new Set([...elements.pageRoot.querySelectorAll("[data-nutrition-household-row]")]
+    .map(input => Number(input.dataset.nutritionHouseholdRow))
+    .filter(Number.isFinite))]
+    .sort((left, right) => left - right)
+    .map(rowIndex => {
+      return NUTRITION_HOUSEHOLD_FIELDS.reduce((row, fieldMeta) => {
+        const input = elements.pageRoot.querySelector(`[data-nutrition-household-field="${fieldMeta.name}"][data-nutrition-household-row="${rowIndex}"]`);
+        row[fieldMeta.name] = normalizeNutritionInputValue(fieldMeta.name, input?.value || "").trim();
+        return row;
+      }, {});
+    })
+    .filter(nutritionHouseholdRowHasValue);
+}
+
+function renderNutritionHouseholdRowsIntoBody(rows) {
+  const body = document.getElementById("nutritionHouseholdBody");
+  if (!body) return;
+
+  const sortedRows = mergeNutritionHouseholdRows(rows);
+  body.innerHTML = sortedRows.length
+    ? sortedRows.map((row, index) => renderNutritionHouseholdRow(row, index, false)).join("")
+    : `<tr class="family-empty-row"><td colspan="${NUTRITION_HOUSEHOLD_FIELDS.length + 1}">No household members added.</td></tr>`;
+  attachCapitalizationHandlers(body);
+  attachNutritionHouseholdRemoveHandlers(body);
+}
+
+function nutritionDraftFromInputs() {
+  const record = { ...(state.currentNutritionBeneficiary || {}) };
+  elements.pageRoot.querySelectorAll("[data-nutrition-field]").forEach(input => {
+    record[input.dataset.nutritionField] = input.value;
+  });
+  record.age = nutritionAgeText(record.birth_date);
+  return record;
+}
+
+function syncNutritionParentHouseholdRows() {
+  const record = nutritionDraftFromInputs();
+  renderNutritionHouseholdRowsIntoBody(ensureNutritionParentHouseholdRows(record, readNutritionHouseholdRowsFromDom()));
+}
+
 function setNutritionOcrStatus(status, summary = "", text = "") {
   const panel = document.getElementById("nutritionOcrPanel");
   const statusNode = document.getElementById("nutritionOcrStatus");
@@ -2536,14 +2687,12 @@ function applyNutritionOcrDraft(draft = {}) {
   if (Array.isArray(draft.household_members) && draft.household_members.length) {
     const body = document.getElementById("nutritionHouseholdBody");
     if (body) {
-      body.innerHTML = draft.household_members
-        .map((row, index) => renderNutritionHouseholdRow(row, index, false))
-        .join("");
-      attachCapitalizationHandlers(body);
-      attachNutritionHouseholdRemoveHandlers(body);
+      renderNutritionHouseholdRowsIntoBody(ensureNutritionParentHouseholdRows(nutritionDraftFromInputs(), draft.household_members));
     }
   }
 
+  syncNutritionParentHouseholdRows();
+  updateNutritionAgeFromBirthDate();
   updateNutritionComputedFields();
 }
 
@@ -2589,26 +2738,26 @@ async function handleNutritionOcrImport(file) {
 
 function updateNutritionAgeFromBirthDate() {
   const birthInput = elements.pageRoot.querySelector('[data-nutrition-field="birth_date"]');
-  const ageInput = elements.pageRoot.querySelector('[data-nutrition-field="age"]');
-  if (!birthInput || !ageInput || !birthInput.value) return;
+  const ageNode = elements.pageRoot.querySelector('[data-nutrition-computed-age="age"]');
+  if (!birthInput || !ageNode) return;
 
-  const birthDate = parseNutritionDate(birthInput.value);
-  if (!birthDate) return;
+  ageNode.textContent = nutritionAgeText(birthInput.value);
+}
+
+function nutritionAgeText(value) {
+  const birthDate = parseNutritionDate(value);
+  if (!birthDate) return "";
 
   const now = new Date();
   let age = now.getFullYear() - birthDate.getFullYear();
   const beforeBirthday = now.getMonth() < birthDate.getMonth()
     || (now.getMonth() === birthDate.getMonth() && now.getDate() < birthDate.getDate());
   if (beforeBirthday) age -= 1;
-  if (age >= 0 && age < 130) ageInput.value = String(age);
+  return age >= 0 && age < 130 ? String(age) : "";
 }
 
 function nutritionComputedDraftFromInputs() {
-  const record = { ...(state.currentNutritionBeneficiary || {}) };
-  elements.pageRoot.querySelectorAll("[data-nutrition-field]").forEach(input => {
-    record[input.dataset.nutritionField] = input.value;
-  });
-  return record;
+  return nutritionDraftFromInputs();
 }
 
 function updateNutritionComputedFields() {
@@ -2676,6 +2825,16 @@ function attachNutritionBeneficiaryFormHandlers() {
   });
 
   elements.pageRoot.querySelectorAll([
+    '[data-nutrition-field="mother_name"]',
+    '[data-nutrition-field="mother_occupation"]',
+    '[data-nutrition-field="father_name"]',
+    '[data-nutrition-field="father_occupation"]'
+  ].join(",")).forEach(input => {
+    input.addEventListener("blur", syncNutritionParentHouseholdRows);
+    input.addEventListener("change", syncNutritionParentHouseholdRows);
+  });
+
+  elements.pageRoot.querySelectorAll([
     '[data-nutrition-field="initial_weight_kg"]',
     '[data-nutrition-field="current_weight_kg"]',
     '[data-nutrition-field="initial_height_cm"]',
@@ -2689,6 +2848,7 @@ function attachNutritionBeneficiaryFormHandlers() {
   attachCapitalizationHandlers(elements.pageRoot);
   attachNutritionHouseholdRemoveHandlers(elements.pageRoot);
   document.getElementById("addNutritionHouseholdButton")?.addEventListener("click", addNutritionHouseholdRow);
+  updateNutritionAgeFromBirthDate();
 }
 
 function collectNutritionBeneficiary() {
@@ -2709,18 +2869,8 @@ function collectNutritionBeneficiary() {
   }
 
   record.picture_data = state.nutritionPictureData || "";
-  record.household_members = [...new Set([...elements.pageRoot.querySelectorAll("[data-nutrition-household-row]")]
-    .map(input => Number(input.dataset.nutritionHouseholdRow))
-    .filter(Number.isFinite))]
-    .sort((left, right) => left - right)
-    .map(rowIndex => {
-      return NUTRITION_HOUSEHOLD_FIELDS.reduce((row, fieldMeta) => {
-        const input = elements.pageRoot.querySelector(`[data-nutrition-household-field="${fieldMeta.name}"][data-nutrition-household-row="${rowIndex}"]`);
-        row[fieldMeta.name] = normalizeNutritionInputValue(fieldMeta.name, input?.value || "").trim();
-        return row;
-      }, {});
-    })
-    .filter(row => NUTRITION_HOUSEHOLD_FIELDS.some(fieldMeta => row[fieldMeta.name]));
+  record.age = nutritionAgeText(record.birth_date);
+  record.household_members = ensureNutritionParentHouseholdRows(record, readNutritionHouseholdRowsFromDom());
 
   return record;
 }
@@ -5410,7 +5560,7 @@ function familyRows(record) {
       row[name] = columns[name][index] || "";
       return row;
     }, {});
-  });
+  }).sort((left, right) => compareRowsByAgeDesc(left, right, "list_c18"));
 }
 
 function nextFamilyRowIndex() {
@@ -5562,7 +5712,7 @@ function collectRecord() {
     return values;
   }, {});
 
-  familyRowIndexes.forEach(rowIndex => {
+  const sortedFamilyRows = familyRowIndexes.map(rowIndex => {
     const rowValues = FAMILY_FIELDS.reduce((values, name) => {
       const input = elements.pageRoot.querySelector(`[data-family-field="${name}"][data-family-row="${rowIndex}"]`);
       values[name] = normalizeFieldValue(name, input?.value || "").trim();
@@ -5570,8 +5720,12 @@ function collectRecord() {
     }, {});
     const hasValue = FAMILY_FIELDS.some(name => rowValues[name]);
 
-    if (!hasValue) return;
+    return hasValue ? rowValues : null;
+  })
+    .filter(Boolean)
+    .sort((left, right) => compareRowsByAgeDesc(left, right, "list_c18"));
 
+  sortedFamilyRows.forEach(rowValues => {
     FAMILY_FIELDS.forEach(name => {
       familyValues[name].push(rowValues[name] || "-");
     });
