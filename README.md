@@ -4,18 +4,17 @@ A standalone Windows desktop database application for Payatas Orione Foundation
 Inc. programs. The app is built with Electron and opens in its own application
 window, not as an Edge or Chrome app-mode window.
 
-The current production modules cover the Livelihood Program and the Nutrition
-Program / Supplemental Feeding profiles, growth monitoring, financial
-reporting, menu planning, and weekly center costing workflows. Future major
-release lines will expand the same system to Scholarship and Health Program
-operations.
+The current production modules cover Livelihood Program records, Nutrition
+Program / Supplemental Feeding operations, and Scholarship Program records,
+finance, academic monitoring, renewal, and evaluation workflows. Health Program
+operations remain on the product roadmap.
 
 Download the Windows installer from the
 [latest GitHub Release](https://github.com/kerbylloren/PAOFI-Database/releases/latest).
 
 ## Current Release
 
-Latest version: `1.4.0`
+Latest version: `2.0.0`
 
 The release includes:
 
@@ -67,6 +66,18 @@ The application will use major version lines to track PAOFI program modules:
 - Weekly budget-released and actual-cost entry with printable costing sheets
 - Paginated monthly-menu and weekly-costing records
 - Readable print layouts with a minimum 10px text size
+- Permanent scholar profiles with household, guardian, contact, photo, and status details
+- Historical school-year enrollment and many-to-many sponsor assignments
+- Individual and organization sponsor profiles with giving histories
+- Scholarship spreadsheet imports with preview, duplicate checks, and row validation
+- Scholarship donations, pledges, payments, allocations, Service Invoices, and supplementary Official Receipts
+- Source-currency tracking with PHP financial books and controlled document states
+- Flexible academic years, grading periods, grading scales, and printable grade monitoring
+- PAOFI activity attendance with batch encoding and attendance summaries
+- Versioned renewal checklists with verification and Program Officer approval
+- Versioned scholar evaluations with scored criteria and documented revisions
+- Scholarship dashboards, filters, paginated tables, exports, audit history, and copy-ready charts
+- Program-based Scholarship permissions with least-privilege access
 - JSON export for backup
 
 ## Cloud Database

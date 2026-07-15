@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Payatas Orione Foundation Inc. Programs Database</title>
-    <link rel="stylesheet" href="/styles.css?v=nutrition-financial-20260713">
+    <link rel="stylesheet" href="/styles.css?v=program-finance-bins-20260715">
   </head>
   <body>
     <a class="skip-link" href="#pageRoot">Skip to main content</a>
@@ -25,7 +25,11 @@
             <span class="nav-icon" data-icon="home"></span>
             <span>Programs Dashboard</span>
           </button>
-          <details class="nav-program" open>
+          <button type="button" data-route="main-bin" class="nav-item" data-requires-workspace>
+            <span class="nav-icon" data-icon="bin"></span>
+            <span>Main Record Bin</span>
+          </button>
+          <details class="nav-program" data-program="livelihood" open>
             <summary>Livelihood Program</summary>
             <button type="button" data-route="search" class="nav-item">
               <span class="nav-icon" data-icon="search"></span>
@@ -47,12 +51,16 @@
               <span class="nav-icon" data-icon="monitoring"></span>
               <span>Monitoring Reports</span>
             </button>
-            <button type="button" data-route="bin" class="nav-item">
+            <button type="button" data-route="livelihood-finance" class="nav-item">
+              <span class="nav-icon" data-icon="finance"></span>
+              <span>Program Finance</span>
+            </button>
+            <button type="button" data-route="livelihood-bin" class="nav-item">
               <span class="nav-icon" data-icon="bin"></span>
               <span>Record Bin</span>
             </button>
           </details>
-          <details class="nav-program">
+          <details class="nav-program" data-program="nutrition">
             <summary>Nutrition Program</summary>
             <button type="button" data-route="nutrition-profiles" class="nav-item">
               <span class="nav-icon" data-icon="users"></span>
@@ -78,8 +86,20 @@
               <span class="nav-icon" data-icon="finance"></span>
               <span>Financial</span>
             </button>
+            <button type="button" data-route="nutrition-finance" class="nav-item">
+              <span class="nav-icon" data-icon="finance"></span>
+              <span>Program Finance Ledger</span>
+            </button>
+            <button type="button" data-route="nutrition-operations" class="nav-item">
+              <span class="nav-icon" data-icon="clipboard"></span>
+              <span>Admissions & Operations</span>
+            </button>
+            <button type="button" data-route="nutrition-bin" class="nav-item">
+              <span class="nav-icon" data-icon="bin"></span>
+              <span>Record Bin</span>
+            </button>
           </details>
-          <details class="nav-program">
+          <details class="nav-program" data-program="scholarship">
             <summary>Scholarship Program</summary>
             <button type="button" data-route="scholarship-scholars" class="nav-item">
               <span class="nav-icon" data-icon="users"></span>
@@ -92,6 +112,10 @@
             <button type="button" data-route="scholarship-donations" class="nav-item">
               <span class="nav-icon" data-icon="finance"></span>
               <span>Donations & Receipts</span>
+            </button>
+            <button type="button" data-route="scholarship-finance" class="nav-item">
+              <span class="nav-icon" data-icon="finance"></span>
+              <span>Program Finance Ledger</span>
             </button>
             <button type="button" data-route="scholarship-grades" class="nav-item">
               <span class="nav-icon" data-icon="book"></span>
@@ -109,8 +133,16 @@
               <span class="nav-icon" data-icon="edit"></span>
               <span>Scholar Evaluation</span>
             </button>
+            <button type="button" data-route="scholarship-operations" class="nav-item">
+              <span class="nav-icon" data-icon="clipboard"></span>
+              <span>Applications & Support</span>
+            </button>
+            <button type="button" data-route="scholarship-bin" class="nav-item">
+              <span class="nav-icon" data-icon="bin"></span>
+              <span>Record Bin</span>
+            </button>
           </details>
-          <details class="nav-program">
+          <details class="nav-program" data-program="health">
             <summary>Health Program</summary>
             <button type="button" data-route="health-patients" class="nav-item">
               <span class="nav-icon" data-icon="users"></span>
@@ -127,6 +159,45 @@
             <button type="button" data-route="health-equipment" class="nav-item">
               <span class="nav-icon" data-icon="table"></span>
               <span>Equipment Inventory</span>
+            </button>
+            <button type="button" data-route="health-finance" class="nav-item">
+              <span class="nav-icon" data-icon="finance"></span>
+              <span>Program Finance</span>
+            </button>
+            <button type="button" data-route="health-bin" class="nav-item">
+              <span class="nav-icon" data-icon="bin"></span>
+              <span>Record Bin</span>
+            </button>
+          </details>
+          <details class="nav-program" data-program="administration">
+            <summary>Administration</summary>
+            <button type="button" data-route="admin-overview" class="nav-item">
+              <span class="nav-icon" data-icon="home"></span>
+              <span>Administrative Overview</span>
+            </button>
+            <button type="button" data-route="admin-cases" class="nav-item">
+              <span class="nav-icon" data-icon="shield"></span>
+              <span>Safeguarding & Cases</span>
+            </button>
+            <button type="button" data-route="admin-people" class="nav-item">
+              <span class="nav-icon" data-icon="users"></span>
+              <span>Staff & Volunteers</span>
+            </button>
+            <button type="button" data-route="admin-assets" class="nav-item">
+              <span class="nav-icon" data-icon="inventory"></span>
+              <span>Assets & Procurement</span>
+            </button>
+            <button type="button" data-route="admin-finance" class="nav-item">
+              <span class="nav-icon" data-icon="finance"></span>
+              <span>Finance & Donations</span>
+            </button>
+            <button type="button" data-route="admin-compliance" class="nav-item">
+              <span class="nav-icon" data-icon="monitoring"></span>
+              <span>Compliance & Reports</span>
+            </button>
+            <button type="button" data-route="admin-bin" class="nav-item">
+              <span class="nav-icon" data-icon="bin"></span>
+              <span>Record Bin</span>
             </button>
           </details>
           <details class="nav-program nav-admin hidden">
@@ -196,6 +267,8 @@
         <strong id="appLoadingMessage">Loading</strong>
       </div>
     </div>
-    <script src="/app.js?v=nutrition-financial-20260713"></script>
+    <script src="/scholarship.js?v=program-finance-bins-20260715"></script>
+    <script src="/operations.js?v=program-finance-bins-20260715"></script>
+    <script src="/app.js?v=program-finance-bins-20260715"></script>
   </body>
 </html>

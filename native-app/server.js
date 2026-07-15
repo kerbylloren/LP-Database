@@ -7,6 +7,13 @@ const { createDatabase } = require("./src/database-factory");
 const { BENEFICIARY_FIELDS, fieldSectionMap } = require("./src/metadata");
 const { recognizeNutritionProfile } = require("./src/nutrition-ocr");
 const { philippineHolidaysForYear } = require("./src/philippine-holidays");
+const { handleScholarshipRequest } = require("./src/scholarship-api");
+const { handleOperationsRequest } = require("./src/operations-api");
+const {
+  ARCHIVE_ROLES,
+  ROUTINE_WRITE_ROLES,
+  WORKSPACE_READ_ROLES
+} = require("./src/program-roles");
 
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 3417);
@@ -171,6 +178,153 @@ function requireSuperadmin(req, res) {
   return session;
 }
 
+async function decorateUser(database, user) {
+  let decorated = user;
+  if (database?.scholarship) decorated = await database.scholarship.decorateUser(decorated);
+  if (database?.operations) decorated = await database.operations.decorateUser(decorated);
+  return decorated;
+}
+
+function hasProgramRole(session, programCode, allowedRoles) {
+  if (session?.user?.role === "superadmin") return true;
+  const roles = new Set(session?.user?.program_roles?.[programCode] || []);
+  return allowedRoles.some(role => roles.has(role));
+}
+
+function existingProgramForPath(pathname) {
+  if (pathname.startsWith("/api/nutrition/")) return "nutrition";
+  if (/^\/api\/(?:records|search|bin|monitoring|metadata|next-control-no)(?:\/|$)/.test(pathname)) return "livelihood";
+  return "";
+}
+
+function requireExistingProgramAccess(req, res, pathname, session) {
+  const programCode = existingProgramForPath(pathname);
+  if (!programCode) return true;
+  let allowedRoles = WORKSPACE_READ_ROLES;
+  if (!["GET", "HEAD"].includes(req.method)) allowedRoles = ROUTINE_WRITE_ROLES;
+  if (req.method === "DELETE") allowedRoles = ARCHIVE_ROLES;
+  if (hasProgramRole(session, programCode, allowedRoles)) return true;
+  sendError(res, 403, `Your account does not have permission for the ${programCode} program.`);
+  return false;
+}
+
+function accessiblePrograms(session) {
+  const programs = ["livelihood", "nutrition", "scholarship", "health", "administration"];
+  if (session?.user?.role === "superadmin") return programs;
+  return programs.filter(programCode => hasProgramRole(session, programCode, WORKSPACE_READ_ROLES));
+}
+
+function canRestoreBinRecord(session, record) {
+  if (session?.user?.role === "superadmin") return true;
+  const financeRecord = record.entity_type === "finance" || /financial|finance/i.test(record.entity_type || "");
+  return hasProgramRole(session, record.program_code, financeRecord ? ["program_officer", "finance"] : ["program_officer"]);
+}
+
+function binLabel(entityType, record = {}) {
+  const name = [record.child_last_name, record.child_first_name].filter(Boolean).join(", ")
+    || [record.last_name, record.first_name].filter(Boolean).join(", ")
+    || record.display_name || record.center_name || record.recipe_name || record.viand_name || record.beneficiary_name
+    || record.control_no || record.report_no || record.reference_no || record.beneficiary_no
+    || record.report_month || record.month_label || record.title || record.name;
+  return String(name || `${entityType} #${record.id || ""}`).slice(0, 240);
+}
+
+async function captureForBin(database, session, programCode, entityType, record) {
+  if (!record || !database.operations) return record;
+  await database.operations.captureDeletedRecord(
+    programCode,
+    entityType,
+    record.id,
+    binLabel(entityType, record),
+    record,
+    session?.user?.id
+  );
+  return record;
+}
+
+function restorableSnapshot(snapshot = {}) {
+  const restored = { ...snapshot };
+  for (const key of ["id", "created_at", "updated_at", "deleted_at"]) delete restored[key];
+  return restored;
+}
+
+async function restoreCapturedRecord(database, binRecord) {
+  const payload = restorableSnapshot(binRecord.snapshot || {});
+  const restorers = {
+    "livelihood-monitoring-report": value => database.saveMonitoringReport(value),
+    "nutrition-center": value => database.saveNutritionCenter(value),
+    "nutrition-beneficiary": value => database.saveNutritionBeneficiary(value),
+    "nutrition-growth-report": value => database.saveNutritionGrowthReport(value),
+    "nutrition-financial-report": value => database.saveNutritionFinancialReport(value),
+    "nutrition-recipe": value => database.saveNutritionRecipe(value),
+    "nutrition-menu": value => database.saveNutritionMenu(value),
+    "nutrition-costing": value => database.saveNutritionCosting(value)
+  };
+  const restore = restorers[binRecord.entity_type];
+  if (!restore) throw new Error("This archived record type cannot be restored automatically.");
+  return restore(payload);
+}
+
+async function listUnifiedBin(database, session, options = {}) {
+  const allowedPrograms = accessiblePrograms(session);
+  const requestedProgram = String(options.program || "");
+  const programs = requestedProgram ? allowedPrograms.filter(code => code === requestedProgram) : allowedPrograms;
+  if (requestedProgram && !programs.length) throw new Error("Your account does not have access to that program bin.");
+  const records = [];
+  for (const programCode of programs) {
+    if (programCode === "livelihood") {
+      const legacy = await database.listDeletedRecords({ limit: 500, offset: 0 });
+      records.push(...legacy.map(record => ({
+        source: "livelihood",
+        id: Number(record.id),
+        program_code: "livelihood",
+        entity_type: "beneficiary-profile",
+        display_label: binLabel("beneficiary-profile", record),
+        deleted_at: record.deleted_at || record.updated_at || ""
+      })));
+    }
+    if (database.operations) {
+      records.push(...await database.operations.listArchived(programCode));
+      records.push(...await database.operations.listCapturedBin(programCode));
+    }
+    if (programCode === "scholarship" && database.scholarship) records.push(...await database.scholarship.listArchived());
+  }
+  const visible = records.filter(record => {
+    if (record.entity_type === "cases" && !hasProgramRole(session, "administration", ["program_officer"])) return false;
+    const search = String(options.search || "").trim().toLowerCase();
+    return !search || `${record.display_label} ${record.entity_type} ${record.program_code}`.toLowerCase().includes(search);
+  });
+  visible.sort((a, b) => String(b.deleted_at || "").localeCompare(String(a.deleted_at || "")));
+  const offset = Math.max(0, Number(options.offset || 0));
+  const limit = Math.max(1, Math.min(200, Number(options.limit || 50)));
+  return {
+    records: visible.slice(offset, offset + limit).map(record => ({ ...record, can_restore: canRestoreBinRecord(session, record) })),
+    total: visible.length,
+    accessible_programs: allowedPrograms
+  };
+}
+
+async function restoreUnifiedBinRecord(database, session, payload = {}) {
+  const source = String(payload.source || "");
+  const id = Number(payload.id || 0);
+  const programCode = String(payload.program_code || "");
+  const entityType = String(payload.entity_type || "");
+  const descriptor = { source, id, program_code: programCode, entity_type: entityType };
+  if (!canRestoreBinRecord(session, descriptor)) throw new Error("Your account cannot restore this record.");
+  if (source === "livelihood") return database.restoreDeletedRecord(id);
+  if (source === "operations") return database.operations.restore(entityType, id, session.user.id);
+  if (source === "scholarship") return database.scholarship.restore(entityType, id, session.user.id);
+  if (source === "captured") {
+    const binRecord = await database.operations.getCapturedBin(id);
+    if (!binRecord || binRecord.restored_at) throw new Error("Archived record was not found.");
+    if (binRecord.program_code !== programCode || binRecord.entity_type !== entityType) throw new Error("Archived record details do not match.");
+    const record = await restoreCapturedRecord(database, binRecord);
+    await database.operations.markCapturedRestored(id, session.user.id);
+    return record;
+  }
+  throw new Error("Unsupported record-bin source.");
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -274,7 +428,8 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
 
       if (pathname === "/api/auth/login" && req.method === "POST") {
         const payload = await readJsonBody(req);
-        const user = await database.authenticateUser(payload.username, payload.password);
+        const authenticatedUser = await database.authenticateUser(payload.username, payload.password);
+        const user = await decorateUser(database, authenticatedUser);
         const session = createSession(user);
         sendJson(res, 200, { token: session.token, user: session.user });
         return;
@@ -290,27 +445,101 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
       if (pathname === "/api/auth/me" && req.method === "GET") {
         const session = requireSession(req, res);
         if (!session) return;
+        session.user = await decorateUser(database, session.user);
         sendJson(res, 200, { user: session.user });
         return;
       }
 
       if (pathname === "/api/users" && req.method === "GET") {
         if (!requireSuperadmin(req, res)) return;
-        sendJson(res, 200, { users: await database.listUsers() });
+        const users = await database.listUsers();
+        sendJson(res, 200, {
+          users: await Promise.all(users.map(user => decorateUser(database, user)))
+        });
         return;
       }
 
       if (pathname === "/api/users" && req.method === "POST") {
         if (!requireSuperadmin(req, res)) return;
         const payload = await readJsonBody(req);
+        const savedUser = await database.saveUser(payload);
+        if (database.operations && savedUser.role !== "superadmin") await database.operations.setUserRoles(savedUser.id, payload.program_roles || {});
         clearResponseCache();
-        sendJson(res, 200, { user: await database.saveUser(payload) });
+        sendJson(res, 200, {
+          user: await decorateUser(database, savedUser)
+        });
         return;
       }
 
-      if (pathname.startsWith("/api/") && !requireSession(req, res)) {
+      let authenticatedSession = null;
+      if (pathname.startsWith("/api/")) {
+        authenticatedSession = requireSession(req, res);
+        if (!authenticatedSession) return;
+      }
+
+      if (await handleScholarshipRequest({
+        req,
+        res,
+        url,
+        database,
+        session: authenticatedSession,
+        sendJson,
+        sendError,
+        readJsonBody,
+        sendCachedJson,
+        cacheKey,
+        clearResponseCache,
+        shortCacheMs: SHORT_CACHE_MS,
+        mediumCacheMs: MEDIUM_CACHE_MS
+      })) {
         return;
       }
+
+      if (await handleOperationsRequest({
+        req,
+        res,
+        url,
+        database,
+        session: authenticatedSession,
+        sendJson,
+        sendError,
+        readJsonBody,
+        sendCachedJson,
+        cacheKey,
+        clearResponseCache,
+        shortCacheMs: SHORT_CACHE_MS,
+        mediumCacheMs: MEDIUM_CACHE_MS
+      })) {
+        return;
+      }
+
+      if (pathname === "/api/record-bin" && req.method === "GET") {
+        try {
+          await sendCachedJson(res, `${cacheKey(req, url)}:user:${authenticatedSession.user.id}`, SHORT_CACHE_MS, () => listUnifiedBin(database, authenticatedSession, {
+            program: url.searchParams.get("program") || "",
+            search: url.searchParams.get("search") || "",
+            limit: url.searchParams.get("limit") || 50,
+            offset: url.searchParams.get("offset") || 0
+          }));
+        } catch (error) {
+          sendError(res, 403, error.message);
+        }
+        return;
+      }
+
+      if (pathname === "/api/record-bin/restore" && req.method === "POST") {
+        try {
+          const payload = await readJsonBody(req);
+          const record = await restoreUnifiedBinRecord(database, authenticatedSession, payload);
+          clearResponseCache();
+          sendJson(res, 200, { record });
+        } catch (error) {
+          sendError(res, /cannot|permission|access/i.test(error.message) ? 403 : 400, error.message);
+        }
+        return;
+      }
+
+      if (!requireExistingProgramAccess(req, res, pathname, authenticatedSession)) return;
 
       if (pathname === "/api/metadata" && req.method === "GET") {
         await sendCachedJson(res, cacheKey(req, url), MEDIUM_CACHE_MS, async () => ({
@@ -440,6 +669,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           return;
         }
 
+        await captureForBin(database, authenticatedSession, "livelihood", "livelihood-monitoring-report", report);
         clearResponseCache();
         sendJson(res, 200, { report });
         return;
@@ -529,6 +759,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           return;
         }
 
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-growth-report", report);
         clearResponseCache();
         sendJson(res, 200, { report });
         return;
@@ -570,6 +801,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           sendError(res, 404, "Recipe was not found.");
           return;
         }
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-recipe", recipe);
         clearResponseCache();
         sendJson(res, 200, { recipe });
         return;
@@ -618,6 +850,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           sendError(res, 404, "Monthly menu was not found.");
           return;
         }
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-menu", menu);
         clearResponseCache();
         sendJson(res, 200, { menu });
         return;
@@ -665,6 +898,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           sendError(res, 404, "Menu costing sheet was not found.");
           return;
         }
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-costing", costing);
         clearResponseCache();
         sendJson(res, 200, { costing });
         return;
@@ -738,6 +972,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           sendError(res, 404, "Financial report was not found.");
           return;
         }
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-financial-report", report);
         clearResponseCache();
         sendJson(res, 200, { report });
         return;
@@ -782,6 +1017,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           return;
         }
 
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-center", center);
         clearResponseCache();
         sendJson(res, 200, { center });
         return;
@@ -833,6 +1069,7 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
           return;
         }
 
+        await captureForBin(database, authenticatedSession, "nutrition", "nutrition-beneficiary", beneficiary);
         clearResponseCache();
         sendJson(res, 200, { beneficiary });
         return;
@@ -857,7 +1094,14 @@ function createServer(database, startupError = null, reconnectDatabase = null) {
       }
 
       if (pathname === "/api/export" && req.method === "GET") {
-        sendJson(res, 200, await database.exportData());
+        if (authenticatedSession?.user?.role !== "superadmin") {
+          sendError(res, 403, "Only the superadmin can export the complete PAOFI database.");
+          return;
+        }
+        const exported = await database.exportData();
+        if (database.scholarship) exported.scholarship = await database.scholarship.exportAll();
+        if (database.operations) exported.operations = await database.operations.exportAll();
+        sendJson(res, 200, exported);
         return;
       }
 

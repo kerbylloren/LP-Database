@@ -20,6 +20,8 @@ const {
   recipeKey,
   scalePurchaseBudget
 } = require("./nutrition-menu");
+const { initializeLocalScholarship } = require("./scholarship-store");
+const { initializeLocalOperations } = require("./operations-store");
 
 const DATA_DIR = path.join(__dirname, "..", "data");
 const DEFAULT_DB_PATH = path.join(DATA_DIR, "lp_database.sqlite");
@@ -1417,6 +1419,8 @@ class BeneficiaryDatabase {
     this.ensureBeneficiaryColumns();
     this.backfillCurrentGroup();
     this.ensureSuperadmin();
+    this.scholarship = initializeLocalScholarship(this.db);
+    this.operations = initializeLocalOperations(this.db);
   }
 
   ensureNutritionFinancialBudgetColumns() {
@@ -1490,7 +1494,23 @@ class BeneficiaryDatabase {
         (SELECT COUNT(*) FROM nutrition_financial_reports) AS nutritionFinancialReports,
         (SELECT COUNT(*) FROM nutrition_recipes) AS nutritionRecipes,
         (SELECT COUNT(*) FROM nutrition_monthly_menus) AS nutritionMonthlyMenus,
-        (SELECT COUNT(*) FROM nutrition_menu_costings) AS nutritionMenuCostings
+        (SELECT COUNT(*) FROM nutrition_menu_costings) AS nutritionMenuCostings,
+        (SELECT COUNT(*) FROM scholarship_scholars WHERE COALESCE(deleted_at, '') = '') AS scholarshipScholars,
+        (SELECT COUNT(*) FROM scholarship_sponsors WHERE COALESCE(deleted_at, '') = '') AS scholarshipSponsors,
+        (SELECT COUNT(*) FROM scholarship_enrollments WHERE COALESCE(deleted_at, '') = '') AS scholarshipEnrollments,
+        (SELECT COUNT(*) FROM scholarship_grade_records WHERE COALESCE(deleted_at, '') = '') AS scholarshipGrades,
+        (SELECT COUNT(*) FROM scholarship_attendance WHERE COALESCE(deleted_at, '') = '') AS scholarshipAttendance,
+        (SELECT COUNT(*) FROM scholarship_payments WHERE COALESCE(deleted_at, '') = '' AND status = 'Cleared') AS scholarshipPayments,
+        (SELECT COUNT(*) FROM health_patients WHERE COALESCE(deleted_at, '') = '') AS healthPatients,
+        (SELECT COUNT(*) FROM health_encounters WHERE COALESCE(deleted_at, '') = '') AS healthEncounters,
+        (SELECT COUNT(*) FROM operations_people WHERE COALESCE(deleted_at, '') = '' AND status = 'Active') AS administrationPeople,
+        (SELECT COUNT(*) FROM operations_assets WHERE COALESCE(deleted_at, '') = '') AS administrationAssets,
+        (SELECT COUNT(*) FROM operations_compliance WHERE COALESCE(deleted_at, '') = '') AS administrationCompliance,
+        (SELECT COUNT(*) FROM operations_finance WHERE COALESCE(deleted_at, '') = '') AS administrationFinance,
+        (SELECT COUNT(*) FROM operations_finance WHERE COALESCE(deleted_at, '') = '' AND program_code = 'livelihood') AS livelihoodFinance,
+        (SELECT COUNT(*) FROM operations_finance WHERE COALESCE(deleted_at, '') = '' AND program_code = 'nutrition') AS nutritionFinance,
+        (SELECT COUNT(*) FROM operations_finance WHERE COALESCE(deleted_at, '') = '' AND program_code = 'scholarship') AS scholarshipFinance,
+        (SELECT COUNT(*) FROM operations_finance WHERE COALESCE(deleted_at, '') = '' AND program_code = 'health') AS healthFinance
     `).get();
 
     return {
@@ -1504,6 +1524,22 @@ class BeneficiaryDatabase {
       nutritionRecipes: Number(row.nutritionRecipes || 0),
       nutritionMonthlyMenus: Number(row.nutritionMonthlyMenus || 0),
       nutritionMenuCostings: Number(row.nutritionMenuCostings || 0),
+      scholarshipScholars: Number(row.scholarshipScholars || 0),
+      scholarshipSponsors: Number(row.scholarshipSponsors || 0),
+      scholarshipEnrollments: Number(row.scholarshipEnrollments || 0),
+      scholarshipGrades: Number(row.scholarshipGrades || 0),
+      scholarshipAttendance: Number(row.scholarshipAttendance || 0),
+      scholarshipPayments: Number(row.scholarshipPayments || 0),
+      healthPatients: Number(row.healthPatients || 0),
+      healthEncounters: Number(row.healthEncounters || 0),
+      administrationPeople: Number(row.administrationPeople || 0),
+      administrationAssets: Number(row.administrationAssets || 0),
+      administrationCompliance: Number(row.administrationCompliance || 0),
+      administrationFinance: Number(row.administrationFinance || 0),
+      livelihoodFinance: Number(row.livelihoodFinance || 0),
+      nutritionFinance: Number(row.nutritionFinance || 0),
+      scholarshipFinance: Number(row.scholarshipFinance || 0),
+      healthFinance: Number(row.healthFinance || 0),
       databasePath: this.dbPath
     };
   }

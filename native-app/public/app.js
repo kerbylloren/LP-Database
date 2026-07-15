@@ -35,6 +35,31 @@ const CHAPEL_OPTIONS = [
   "Fatima"
 ];
 
+const WORKSPACE_ROLES = new Set(["program_officer", "finance", "program_assistant", "coordinator", "encoder", "viewer"]);
+const ACCOUNT_PROGRAM_ROLES = [
+  ["program_officer", "Program Officer"],
+  ["finance", "Finance"],
+  ["program_assistant", "Program Assistant"],
+  ["coordinator", "Coordinator"],
+  ["encoder", "Encoder (Legacy)"],
+  ["viewer", "Viewer"],
+  ["volunteer", "Volunteer"],
+  ["scholar", "Scholar"]
+];
+
+function userProgramRoles(programCode) {
+  return new Set(state.currentUser?.program_roles?.[programCode] || []);
+}
+
+function hasWorkspaceAccess(programCode) {
+  if (state.currentUser?.role === "superadmin") return true;
+  return [...userProgramRoles(programCode)].some(role => WORKSPACE_ROLES.has(role));
+}
+
+function accessibleWorkspacePrograms() {
+  return ["livelihood", "nutrition", "scholarship", "health", "administration"].filter(hasWorkspaceAccess);
+}
+
 const DROPDOWN_OPTIONS = {
   field_h11: ["Female", "Male"],
   field_c12: CHAPEL_OPTIONS,
@@ -366,6 +391,9 @@ const ICONS = {
   finance: '<svg viewBox="0 0 24 24"><path d="M3 21h18"></path><path d="M6 21V9"></path><path d="M12 21V4"></path><path d="M18 21v-7"></path><path d="M8 9l4-5 4 10 3-3"></path></svg>',
   heart: '<svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"></path></svg>',
   inventory: '<svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8l9 5 9-5Z"></path><path d="M3 8v8l9 5 9-5V8"></path><path d="M12 13v8"></path></svg>',
+  clipboard: '<svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 4V2h6v2M8 9h8M8 13h8M8 17h5"></path></svg>',
+  shield: '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-5"></path></svg>',
+  close: '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></svg>',
   save: '<svg viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5V3Z"></path><path d="M8 3v6h8V3"></path><path d="M8 21v-7h8v7"></path></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>',
   print: '<svg viewBox="0 0 24 24"><path d="M7 9V3h10v6"></path><path d="M7 17H5a2 2 0 0 1-2-2v-4h18v4a2 2 0 0 1-2 2h-2"></path><path d="M7 14h10v7H7z"></path></svg>',
@@ -414,7 +442,7 @@ const COMING_SOON_PAGES = {
   "scholarship-evaluations": {
     program: "Scholarship Program",
     title: "Scholar Evaluation",
-    description: "Evaluation records, notes, scores, and renewal recommendations."
+    description: "Weighted 80/5/5/5/5 renewal evaluations, rankings, decisions, and supplementary scholar reviews."
   },
   "health-patients": {
     program: "Health Program - Fr. Angelo Falardi Clinic",
@@ -851,6 +879,14 @@ function setAuthenticatedSession(token, user) {
   document.querySelectorAll(".nav-admin").forEach(item => {
     item.classList.toggle("hidden", state.currentUser?.role !== "superadmin");
   });
+  document.querySelectorAll(".nav-program[data-program]").forEach(group => {
+    const programCode = group.dataset.program;
+    const hasAccess = hasWorkspaceAccess(programCode);
+    group.classList.toggle("hidden", !hasAccess);
+  });
+  document.querySelectorAll("[data-requires-workspace]").forEach(item => {
+    item.classList.toggle("hidden", !accessibleWorkspacePrograms().length);
+  });
   elements.currentUser.textContent = state.currentUser
     ? `${state.currentUser.display_name || state.currentUser.username} (${state.currentUser.role})`
     : "";
@@ -1004,11 +1040,31 @@ function navigate(route, id = "") {
   location.hash = id ? `#/${route}/${id}` : `#/${route}`;
 }
 
+function programForRoute(route) {
+  if (["search", "editor", "viewer", "database", "monitoring", "bin", "livelihood-finance", "livelihood-bin"].includes(route)) return "livelihood";
+  if (route.startsWith("nutrition-")) return "nutrition";
+  if (route.startsWith("scholarship-")) return "scholarship";
+  if (route.startsWith("health-")) return "health";
+  if (route.startsWith("admin-")) return "administration";
+  return "";
+}
+
 async function renderRoute() {
   if (!state.currentUser) return;
 
   const parsed = parseRoute();
   if (["accounts", "system"].includes(parsed.route) && state.currentUser.role !== "superadmin") {
+    navigate("menu");
+    return;
+  }
+  const programCode = programForRoute(parsed.route);
+  if (programCode
+      && state.currentUser.role !== "superadmin"
+      && !hasWorkspaceAccess(programCode)) {
+    navigate("menu");
+    return;
+  }
+  if (parsed.route === "main-bin" && !accessibleWorkspacePrograms().length) {
     navigate("menu");
     return;
   }
@@ -1029,6 +1085,47 @@ async function renderRoute() {
     else if (parsed.route === "nutrition-menu") await renderNutritionMenuPage(parsed.id);
     else if (parsed.route === "nutrition-recipes") await renderNutritionRecipePage(parsed.id);
     else if (parsed.route === "nutrition-budget") await renderNutritionFinancialPage(parsed.id);
+    else if ((parsed.route === "main-bin"
+      || parsed.route === "livelihood-finance"
+      || parsed.route === "livelihood-bin"
+      || parsed.route === "nutrition-finance"
+      || parsed.route === "nutrition-bin"
+      || parsed.route === "scholarship-finance"
+      || parsed.route === "scholarship-bin"
+      || parsed.route === "nutrition-operations"
+      || parsed.route === "scholarship-operations"
+      || parsed.route.startsWith("health-")
+      || parsed.route.startsWith("admin-")) && window.OperationsApp) {
+      await window.OperationsApp.renderRoute(parsed.route, parsed.id, {
+        root: elements.pageRoot,
+        api,
+        setTitle,
+        setTopbarActions,
+        showToast,
+        navigate,
+        icon,
+        escapeHtml,
+        formatMoney,
+        currentUser: state.currentUser,
+        showDocumentPrintPreview
+      });
+    }
+    else if (parsed.route.startsWith("scholarship-") && window.ScholarshipApp) {
+      await window.ScholarshipApp.renderRoute(parsed.route, parsed.id, {
+        root: elements.pageRoot,
+        api,
+        setTitle,
+        setTopbarActions,
+        showToast,
+        navigate,
+        icon,
+        escapeHtml,
+        formatMoney,
+        currentUser: state.currentUser,
+        enforceMinimumPrintFontSize,
+        showDocumentPrintPreview
+      });
+    }
     else if (parsed.route === "bin") await renderBinPage();
     else if (parsed.route === "system") await renderSystemPage();
     else if (parsed.route === "accounts") await renderAccountsPage();
@@ -1906,53 +2003,58 @@ async function renderMenuPage() {
   state.dashboardAnalyticsLoaded = false;
   state.dashboardAnalyticsLoading = false;
 
-  const [stats, recordsPayload] = await Promise.all([
-    refreshStats(),
-    api("/api/records?limit=8&detail=table")
-  ]);
-  const recentUpdates = (recordsPayload.records || []).slice(0, 6);
+  const stats = await refreshStats();
+  const workspaces = accessibleWorkspacePrograms();
+  const programCards = [
+    { code: "livelihood", label: "Livelihood", value: stats.active || 0, route: "database", caption: "beneficiary profiles" },
+    { code: "nutrition", label: "Nutrition", value: stats.nutritionBeneficiaries || 0, route: "nutrition-profiles", caption: "feeding beneficiaries" },
+    { code: "scholarship", label: "Scholarship", value: stats.scholarshipScholars || 0, route: "scholarship-scholars", caption: "scholar profiles" },
+    { code: "health", label: "Health", value: stats.healthPatients || 0, route: "health-patients", caption: "patient profiles" },
+    { code: "administration", label: "Administration", value: stats.administrationPeople || 0, route: "admin-overview", caption: "active personnel" }
+  ];
+  const workspaceCommands = [
+    hasWorkspaceAccess("livelihood") ? dashboardCommand("database", "table", "Livelihood Program", "Profiles, monitoring, analytics, and finance") : "",
+    hasWorkspaceAccess("nutrition") ? dashboardCommand("nutrition-profiles", "users", "Nutrition Program", "Feeding profiles, growth, menus, and finance") : "",
+    hasWorkspaceAccess("scholarship") ? dashboardCommand("scholarship-scholars", "book", "Scholarship Program", "Scholars, sponsors, monitoring, and finance") : "",
+    hasWorkspaceAccess("health") ? dashboardCommand("health-patients", "monitoring", "Health Program", "Patients, encounters, inventory, and finance") : "",
+    hasWorkspaceAccess("administration") ? dashboardCommand("admin-overview", "shield", "Administration", "People, assets, compliance, and shared finance") : "",
+    workspaces.length ? dashboardCommand("main-bin", "bin", "Main Record Bin", "Restore archived records across your authorized programs") : ""
+  ].filter(Boolean);
+  const authorityRows = Object.entries(state.currentUser?.program_roles || {})
+    .filter(([, roles]) => roles?.length)
+    .map(([program, roles]) => ({ program, roles }));
 
   elements.pageRoot.innerHTML = `
     <section class="dashboard-page">
       <section class="dashboard-intro scroll-reveal">
         <div class="dashboard-intro-copy">
-          <p class="eyebrow">Organization-wide records</p>
-          <h2>Program work at a glance</h2>
-          <span>Key records and latest changes across the active PAOFI database sections.</span>
+          <p class="eyebrow">Organization-wide overview</p>
+          <h2>PAOFI programs at a glance</h2>
+          <span>High-level service and record summaries, tailored to your assigned authority.</span>
         </div>
         <div class="dashboard-metrics-strip" aria-label="Key database summaries">
-          ${dashboardMetric("LP Records", stats.active, "database")}
-          ${dashboardMetric("LP Reports", stats.monitoringReports || 0, "monitoring")}
-          ${dashboardMetric("Feeding Profiles", stats.nutritionBeneficiaries || 0, "nutrition-profiles")}
-          ${dashboardMetric("Growth Reports", stats.nutritionGrowthReports || 0, "nutrition-growth")}
-          ${dashboardMetric("Centers", stats.nutritionCenters || 0, "nutrition-centers")}
+          ${programCards.map(card => dashboardMetric(card.label, card.value, hasWorkspaceAccess(card.code) ? card.route : "", card.caption)).join("")}
         </div>
       </section>
 
       <section class="dashboard-workspace scroll-reveal">
         <div class="dashboard-actions-panel">
           <div class="dashboard-section-heading">
-            <h3>Open a workspace</h3>
-            <span>Common day-to-day paths</span>
+            <h3>${workspaceCommands.length ? "Your workspaces" : "Organization dashboard"}</h3>
+            <span>${workspaceCommands.length ? "Programs available under your assigned roles" : "Your account currently has dashboard-only access"}</span>
           </div>
           <div class="dashboard-command-list">
-            ${dashboardCommand("search", "search", "Search Records", "Find an existing Livelihood Program profile")}
-            ${dashboardCommand("editor", "edit", "New LP Application", "Create or update a livelihood beneficiary profile")}
-            ${dashboardCommand("database", "table", "LP Database & Analytics", "Review records, filters, and detailed analytics")}
-            ${dashboardCommand("monitoring", "monitoring", "LP Monitoring Reports", "Encode monthly livelihood reports")}
-            ${dashboardCommand("nutrition-profiles", "users", "Feeding Beneficiary Profiles", "Manage supplemental feeding child profiles")}
-            ${dashboardCommand("nutrition-growth", "monitoring", "Growth Monitoring", "Encode and print monthly or yearly growth reports")}
-            ${dashboardCommand("nutrition-centers", "home", "Feeding Centers", "View center profiles and child rosters")}
+            ${workspaceCommands.join("") || `<div class="empty-state">You can review organization-wide summaries here. A Program Officer or Superadmin can add operational workspace access when your assignment requires it.</div>`}
           </div>
         </div>
 
         <div class="dashboard-activity-panel">
           <div class="dashboard-section-heading">
-            <h3>Recent Updates</h3>
-            <button type="button" class="text-button" data-menu-route="database">Open Table</button>
+            <h3>Your authority</h3>
+            <span>${escapeHtml(state.currentUser?.display_name || state.currentUser?.username || "Signed-in user")}</span>
           </div>
-          <div class="recent-update-list">
-            ${recentUpdates.length ? recentUpdates.map(recentUpdateRow).join("") : emptyState("No recent updates yet.")}
+          <div class="dashboard-authority-list">
+            ${state.currentUser?.role === "superadmin" ? `<div class="dashboard-authority-row"><strong>Superadmin</strong><span>Organization-wide administration and program access</span></div>` : authorityRows.length ? authorityRows.map(item => `<div class="dashboard-authority-row"><strong>${escapeHtml(item.program.replace(/\b\w/g, letter => letter.toUpperCase()))}</strong><span>${escapeHtml(item.roles.map(role => role.replaceAll("_", " ")).join(", "))}</span></div>`).join("") : `<div class="dashboard-authority-row"><strong>Dashboard access</strong><span>No operational program role is assigned</span></div>`}
           </div>
         </div>
       </section>
@@ -1970,7 +2072,6 @@ async function renderMenuPage() {
   document.querySelectorAll("[data-menu-route]").forEach(button => {
     button.addEventListener("click", () => navigate(button.dataset.menuRoute));
   });
-  attachRecordOpenHandlers(elements.pageRoot);
   setupDashboardScrollEffects();
   setupDashboardAnalyticsLazyLoad();
 }
@@ -2100,17 +2201,11 @@ async function loadDashboardAnalytics() {
   if (host) host.classList.add("is-loading");
 
   try {
-    const [recordsPayload, growthReports] = await Promise.all([
-      api("/api/records?limit=250&detail=table", { loadingMessage: "Building analytics" }),
-      loadNutritionGrowthReports()
-    ]);
-    const records = recordsPayload.records || [];
-    const reports = growthReports || [];
     const activeHost = document.getElementById("dashboardAnalyticsHost");
     if (!activeHost) return;
     activeHost.className = "dashboard-analytics-content";
-    activeHost.innerHTML = renderDashboardAnalytics(records, reports);
-    await renderDashboardVegaCharts(records, reports);
+    activeHost.innerHTML = renderDashboardAnalytics(state.stats || {});
+    await renderDashboardVegaCharts(state.stats || {});
     requestAnimationFrame(() => activeHost.classList.add("is-ready"));
     state.dashboardAnalyticsLoaded = true;
   } catch (error) {
@@ -2132,62 +2227,59 @@ async function loadDashboardAnalytics() {
   }
 }
 
-function renderDashboardAnalytics(records = [], growthReports = []) {
-  const recordAnalytics = buildAnalytics(records);
-  const growthAnalytics = buildNutritionGrowthAnalytics(growthReports, []);
-  const needsFollowUp = growthAnalytics.statusCounts
-    .filter(entry => ["Severely Underweight", "Underweight"].includes(entry.label))
-    .reduce((sum, entry) => sum + entry.count, 0);
-  const topGroup = topAnalyticsEntry(recordAnalytics.groupCounts);
-  const topStatus = topAnalyticsEntry(growthAnalytics.statusCounts.filter(entry => entry.count > 0));
+function renderDashboardAnalytics(stats = {}) {
+  const profileTotal = Number(stats.active || 0) + Number(stats.nutritionBeneficiaries || 0) + Number(stats.scholarshipScholars || 0) + Number(stats.healthPatients || 0);
+  const monitoringTotal = Number(stats.monitoringReports || 0) + Number(stats.nutritionGrowthReports || 0) + Number(stats.scholarshipEnrollments || 0) + Number(stats.healthEncounters || 0);
+  const financeTotal = Number(stats.administrationFinance || 0);
+  const activePrograms = [stats.active, stats.nutritionBeneficiaries, stats.scholarshipScholars, stats.healthPatients].filter(value => Number(value || 0) > 0).length;
 
   return `
     <div class="dashboard-analytics-landscape">
       <div class="analytics-ribbon">
-        ${dashboardAnalyticsStat("Records Reviewed", recordAnalytics.total, "latest active LP rows")}
-        ${dashboardAnalyticsStat("Top LP Group", topGroup.label, analyticsPlural(topGroup.count, "record"))}
-        ${dashboardAnalyticsStat("Growth Reports", growthAnalytics.reports, "monthly center reports")}
-        ${dashboardAnalyticsStat("Needs Follow-Up", needsFollowUp, "nutrition cases")}
+        ${dashboardAnalyticsStat("Program Profiles", profileTotal, "active service records")}
+        ${dashboardAnalyticsStat("Active Programs", activePrograms, "programs with recorded clients")}
+        ${dashboardAnalyticsStat("Monitoring Activity", monitoringTotal, "reports and encounters")}
+        ${dashboardAnalyticsStat("Finance Ledger", financeTotal, "shared control records")}
       </div>
-      <section class="analytics-shape growth-pulse" data-chart-copy-surface data-chart-copy-name="Growth Classification">
+      <section class="analytics-shape growth-pulse" data-chart-copy-surface data-chart-copy-name="Program Profiles">
         <div class="analytics-shape-heading">
-          <span>Growth Classification</span>
+          <span>Program Profiles</span>
           <div class="analytics-shape-insight">
-            <strong>${escapeHtml(topStatus.label || "No Data")}</strong>
-            ${chartCopyButton("Growth Classification")}
+            <strong>Organization reach</strong>
+            ${chartCopyButton("Program Profiles")}
           </div>
         </div>
-        <div id="dashboardGrowthStatusChart" class="vega-chart"></div>
+        <div id="dashboardProgramProfilesChart" class="vega-chart"></div>
       </section>
-      <section class="analytics-shape month-flow" data-chart-copy-surface data-chart-copy-name="Monthly Filing Flow">
+      <section class="analytics-shape month-flow" data-chart-copy-surface data-chart-copy-name="Monitoring Activity">
         <div class="analytics-shape-heading">
-          <span>Monthly Filing Flow</span>
+          <span>Monitoring Activity</span>
           <div class="analytics-shape-insight">
-            <strong>${escapeHtml(growthAnalytics.latestMonth)}</strong>
-            ${chartCopyButton("Monthly Filing Flow")}
+            <strong>${monitoringTotal} records</strong>
+            ${chartCopyButton("Monitoring Activity")}
           </div>
         </div>
-        <div id="dashboardGrowthMonthChart" class="vega-chart"></div>
+        <div id="dashboardMonitoringChart" class="vega-chart"></div>
       </section>
-      <section class="analytics-shape group-current" data-chart-copy-surface data-chart-copy-name="Livelihood Groups">
+      <section class="analytics-shape group-current" data-chart-copy-surface data-chart-copy-name="Program Finance">
         <div class="analytics-shape-heading">
-          <span>Livelihood Groups</span>
+          <span>Program Finance</span>
           <div class="analytics-shape-insight">
-            <strong>${escapeHtml(topGroup.label)}</strong>
-            ${chartCopyButton("Livelihood Groups")}
+            <strong>Shared ledger</strong>
+            ${chartCopyButton("Program Finance")}
           </div>
         </div>
-        <div id="dashboardLpGroupChart" class="vega-chart"></div>
+        <div id="dashboardFinanceChart" class="vega-chart"></div>
       </section>
-      <section class="analytics-shape status-stream" data-chart-copy-surface data-chart-copy-name="Record Status">
+      <section class="analytics-shape status-stream" data-chart-copy-surface data-chart-copy-name="Administrative Coverage">
         <div class="analytics-shape-heading">
-          <span>Record Status</span>
+          <span>Administrative Coverage</span>
           <div class="analytics-shape-insight">
-            <strong>Database mix</strong>
-            ${chartCopyButton("Record Status")}
+            <strong>Organization controls</strong>
+            ${chartCopyButton("Administrative Coverage")}
           </div>
         </div>
-        <div id="dashboardRecordStatusChart" class="vega-chart"></div>
+        <div id="dashboardAdministrationChart" class="vega-chart"></div>
       </section>
     </div>
   `;
@@ -2212,7 +2304,7 @@ function vegaValues(entries = [], fallbackLabel = "No Data") {
 
 function dashboardVegaBase(width = "container", height = 210) {
   return {
-    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+    "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
     "width": width,
     "height": height,
     "padding": { "left": 10, "right": 12, "top": 10, "bottom": 10 },
@@ -2248,15 +2340,37 @@ function dashboardVegaBase(width = "container", height = 210) {
   };
 }
 
-function dashboardVegaSpecs(records = [], growthReports = []) {
-  const recordAnalytics = buildAnalytics(records);
-  const growthAnalytics = buildNutritionGrowthAnalytics(growthReports, []);
+function dashboardVegaSpecs(stats = {}) {
   const palette = ["#0d5637", "#9be87d", "#3f88c5", "#f4c84c", "#8f7bdc"];
+  const profiles = [
+    { label: "Livelihood", count: Number(stats.active || 0) },
+    { label: "Nutrition", count: Number(stats.nutritionBeneficiaries || 0) },
+    { label: "Scholarship", count: Number(stats.scholarshipScholars || 0) },
+    { label: "Health", count: Number(stats.healthPatients || 0) }
+  ];
+  const monitoring = [
+    { label: "Livelihood Reports", count: Number(stats.monitoringReports || 0) },
+    { label: "Growth Reports", count: Number(stats.nutritionGrowthReports || 0) },
+    { label: "Scholar Enrollments", count: Number(stats.scholarshipEnrollments || 0) },
+    { label: "Health Encounters", count: Number(stats.healthEncounters || 0) }
+  ];
+  const finance = [
+    { label: "Livelihood", count: Number(stats.livelihoodFinance || 0) },
+    { label: "Nutrition", count: Number(stats.nutritionFinance || 0) },
+    { label: "Scholarship", count: Number(stats.scholarshipFinance || 0) },
+    { label: "Health", count: Number(stats.healthFinance || 0) }
+  ];
+  const administration = [
+    { label: "People", count: Number(stats.administrationPeople || 0) },
+    { label: "Assets", count: Number(stats.administrationAssets || 0) },
+    { label: "Compliance", count: Number(stats.administrationCompliance || 0) },
+    { label: "Finance", count: Number(stats.administrationFinance || 0) }
+  ];
 
   return {
-    dashboardGrowthStatusChart: {
+    dashboardProgramProfilesChart: {
       ...dashboardVegaBase("container", 404),
-      "data": { "values": vegaValues(growthAnalytics.statusCounts, "No Classification") },
+      "data": { "values": vegaValues(profiles, "No Profiles") },
       "mark": { "type": "arc", "innerRadius": 76, "outerRadius": 138, "cornerRadius": 8, "padAngle": 0.035 },
       "encoding": {
         "theta": { "field": "count", "type": "quantitative" },
@@ -2267,55 +2381,49 @@ function dashboardVegaSpecs(records = [], growthReports = []) {
           "legend": { "orient": "bottom", "columns": 2, "labelLimit": 170, "columnPadding": 16, "rowPadding": 10 }
         },
         "tooltip": [
-          { "field": "label", "type": "nominal", "title": "Classification" },
-          { "field": "count", "type": "quantitative", "title": "Children" }
+          { "field": "label", "type": "nominal", "title": "Program" },
+          { "field": "count", "type": "quantitative", "title": "Profiles" }
         ]
       }
     },
-    dashboardGrowthMonthChart: {
+    dashboardMonitoringChart: {
       ...dashboardVegaBase("container", 184),
-      "data": { "values": vegaValues(growthAnalytics.monthCounts, "No Month") },
-      "mark": {
-        "type": "area",
-        "interpolate": "monotone",
-        "line": { "color": "#0d5637", "strokeWidth": 3.5 },
-        "point": { "filled": true, "fill": "#ffffff", "stroke": "#0d5637", "strokeWidth": 2, "size": 72 },
-        "color": "#9be87d",
-        "opacity": 0.42
-      },
+      "data": { "values": vegaValues(monitoring, "No Monitoring") },
+      "mark": { "type": "bar", "cornerRadiusTopLeft": 8, "cornerRadiusTopRight": 8 },
       "encoding": {
-        "x": { "field": "label", "type": "ordinal", "sort": null, "axis": { "labelAngle": 0 } },
+        "x": { "field": "label", "type": "nominal", "sort": null, "axis": { "labelAngle": -18, "labelLimit": 120 } },
         "y": { "field": "count", "type": "quantitative", "axis": { "tickCount": 5 } },
+        "color": { "field": "label", "type": "nominal", "legend": null, "scale": { "range": palette } },
         "tooltip": [
-          { "field": "label", "type": "ordinal", "title": "Month" },
-          { "field": "count", "type": "quantitative", "title": "Reports" }
+          { "field": "label", "type": "nominal", "title": "Activity" },
+          { "field": "count", "type": "quantitative", "title": "Records" }
         ]
       }
     },
-    dashboardLpGroupChart: {
+    dashboardFinanceChart: {
       ...dashboardVegaBase("container", 172),
-      "data": { "values": vegaValues(recordAnalytics.groupCounts, "No Group") },
+      "data": { "values": vegaValues(finance, "No Finance Records") },
       "mark": { "type": "bar", "cornerRadiusEnd": 10 },
       "encoding": {
         "y": { "field": "label", "type": "nominal", "sort": "-x", "axis": { "labelLimit": 170 } },
         "x": { "field": "count", "type": "quantitative", "axis": { "tickCount": 5 } },
         "color": { "field": "label", "type": "nominal", "legend": null, "scale": { "range": palette } },
         "tooltip": [
-          { "field": "label", "type": "nominal", "title": "Group" },
+          { "field": "label", "type": "nominal", "title": "Program" },
           { "field": "count", "type": "quantitative", "title": "Records" }
         ]
       }
     },
-    dashboardRecordStatusChart: {
+    dashboardAdministrationChart: {
       ...dashboardVegaBase("container", 178),
-      "data": { "values": vegaValues(recordAnalytics.statusCounts, "No Status") },
+      "data": { "values": vegaValues(administration, "No Administrative Records") },
       "mark": { "type": "bar", "cornerRadiusEnd": 12, "height": { "band": 0.56 } },
       "encoding": {
         "y": { "field": "label", "type": "nominal", "sort": "-x", "axis": { "labelLimit": 130 } },
         "x": { "field": "count", "type": "quantitative", "axis": { "tickCount": 8 } },
         "color": { "field": "label", "type": "nominal", "legend": null, "scale": { "range": palette } },
         "tooltip": [
-          { "field": "label", "type": "nominal", "title": "Status" },
+          { "field": "label", "type": "nominal", "title": "Area" },
           { "field": "count", "type": "quantitative", "title": "Records" }
         ]
       }
@@ -2323,10 +2431,10 @@ function dashboardVegaSpecs(records = [], growthReports = []) {
   };
 }
 
-async function renderDashboardVegaCharts(records = [], growthReports = []) {
+async function renderDashboardVegaCharts(stats = {}) {
   await loadVegaRuntime();
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const specs = dashboardVegaSpecs(records, growthReports);
+  const specs = dashboardVegaSpecs(stats);
   await Promise.all(Object.entries(specs).map(([id, spec]) => {
     const target = document.getElementById(id);
     if (!target || !window.vegaEmbed) return Promise.resolve();
@@ -2344,12 +2452,14 @@ async function renderDashboardVegaCharts(records = [], growthReports = []) {
   }));
 }
 
-function dashboardMetric(label, value, route) {
+function dashboardMetric(label, value, route, caption = "") {
+  const tag = route ? "button" : "div";
   return `
-    <button type="button" class="dashboard-metric" data-menu-route="${escapeHtml(route)}">
+    <${tag} ${route ? `type="button" data-menu-route="${escapeHtml(route)}"` : ""} class="dashboard-metric ${route ? "" : "is-summary-only"}">
       <strong>${escapeHtml(value)}</strong>
       <span>${escapeHtml(label)}</span>
-    </button>
+      ${caption ? `<em>${escapeHtml(caption)}</em>` : ""}
+    </${tag}>
   `;
 }
 
@@ -8369,6 +8479,8 @@ async function renderSystemPage() {
           ${dashboardSummaryRow("Record bin", stats.deleted, "Deleted records available for restore", "bin")}
           ${dashboardSummaryRow("Nutrition profiles", stats.nutritionBeneficiaries || 0, "Supplemental feeding beneficiaries", "nutrition-profiles")}
           ${dashboardSummaryRow("Growth reports", stats.nutritionGrowthReports || 0, "Nutrition monitoring reports", "nutrition-growth")}
+          ${dashboardSummaryRow("Scholarship profiles", stats.scholarshipScholars || 0, "Scholar profile records", "scholarship-scholars")}
+          ${dashboardSummaryRow("Scholarship sponsors", stats.scholarshipSponsors || 0, "Sponsor relationship records", "scholarship-sponsors")}
         </div>
       </div>
     </section>
@@ -8383,6 +8495,14 @@ async function renderSystemPage() {
 }
 
 async function renderAccountsPage() {
+  const programRoleGroups = [
+    ["livelihood", "Livelihood Program"],
+    ["nutrition", "Nutrition Program"],
+    ["scholarship", "Scholarship Program"],
+    ["health", "Health Program"],
+    ["administration", "Administration"]
+  ];
+  const availableRoles = ACCOUNT_PROGRAM_ROLES;
   setTitle("Accounts");
   setTopbarActions([
     { id: "accountsRefresh", label: "Refresh", icon: "refresh", onClick: () => renderAccountsPage().catch(error => showToast(error.message)) }
@@ -8413,6 +8533,22 @@ async function renderAccountsPage() {
           <input id="accountActive" type="checkbox" checked>
           <span>Active account</span>
         </label>
+        <div class="account-program-roles">
+          <p class="account-role-guidance">Program Officers approve and administer; Finance controls financial records; Program Assistants and Coordinators handle routine records; Volunteer and Scholar are dashboard-only affiliations until a specific record assignment is configured.</p>
+          ${programRoleGroups.map(([programCode, programLabel]) => `
+            <fieldset class="account-role-fieldset">
+              <legend>${programLabel}</legend>
+              <div class="account-role-grid">
+                ${availableRoles.map(([value, label]) => `
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-program-role="${programCode}" value="${value}">
+                    <span>${label}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </fieldset>
+          `).join("")}
+        </div>
         <div class="form-actions">
           <button type="button" id="accountReset" class="action-button">Clear</button>
           <button type="submit" class="action-button primary">
@@ -8431,7 +8567,10 @@ async function renderAccountsPage() {
             <article class="account-card">
               <div>
                 <strong>${escapeHtml(user.display_name || user.username)}</strong>
-                <span>${escapeHtml(user.username)} | ${escapeHtml(user.role)} | ${user.active ? "Active" : "Inactive"}</span>
+                <span>
+                  ${escapeHtml(user.username)} | ${escapeHtml(user.role)} | ${user.active ? "Active" : "Inactive"}
+                  ${programRoleGroups.map(([programCode, programLabel]) => user.program_roles?.[programCode]?.length ? ` | ${programLabel}: ${escapeHtml(user.program_roles[programCode].map(role => role.replaceAll("_", " ")).join(", "))}` : "").join("")}
+                </span>
               </div>
               <button type="button" class="icon-button" title="Edit account" data-account-id="${user.id}">
                 ${icon("edit")}
@@ -8449,6 +8588,7 @@ async function renderAccountsPage() {
   const username = document.getElementById("accountUsername");
   const password = document.getElementById("accountPassword");
   const active = document.getElementById("accountActive");
+  const programRoleInputs = [...document.querySelectorAll("[data-program-role]")];
 
   function resetForm() {
     accountId.value = "";
@@ -8457,6 +8597,7 @@ async function renderAccountsPage() {
     password.value = "";
     password.placeholder = "Required for new users";
     active.checked = true;
+    programRoleInputs.forEach(input => { input.checked = false; });
   }
 
   document.getElementById("accountReset").addEventListener("click", resetForm);
@@ -8472,6 +8613,9 @@ async function renderAccountsPage() {
       password.value = "";
       password.placeholder = "Leave blank to keep current password";
       active.checked = Boolean(user.active);
+      programRoleInputs.forEach(input => {
+        input.checked = new Set(user.program_roles?.[input.dataset.programRole] || []).has(input.value);
+      });
       displayName.focus();
     });
   });
@@ -8487,7 +8631,11 @@ async function renderAccountsPage() {
           display_name: displayName.value,
           username: username.value,
           password: password.value,
-          active: active.checked
+          active: active.checked,
+          program_roles: Object.fromEntries(programRoleGroups.map(([programCode]) => [
+            programCode,
+            programRoleInputs.filter(input => input.dataset.programRole === programCode && input.checked).map(input => input.value)
+          ]))
         })
       });
       showToast("Account saved.");
@@ -8908,13 +9056,19 @@ async function initialize() {
 }
 
 async function loadApplication() {
-  const metadata = await api("/api/metadata");
-  state.fields = metadata.fields;
-  state.sections = metadata.sections;
-  state.fieldMap = metadata.fields.reduce((map, item) => {
-    map[item.name] = item;
-    return map;
-  }, {});
+  if (hasWorkspaceAccess("livelihood")) {
+    const metadata = await api("/api/metadata");
+    state.fields = metadata.fields;
+    state.sections = metadata.sections;
+    state.fieldMap = metadata.fields.reduce((map, item) => {
+      map[item.name] = item;
+      return map;
+    }, {});
+  } else {
+    state.fields = [];
+    state.sections = {};
+    state.fieldMap = {};
+  }
 
   elements.navItems.forEach(item => {
     if (item.dataset.lpdbBound === "1") return;
